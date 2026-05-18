@@ -15,11 +15,11 @@
 **Hydr'Hacked** est une solution complète (Serveur API + Interface Web) pour crawler, rechercher et télécharger du contenu depuis **Zone-Telechargement** (par défaut) ou **Hydracker** (en option). 
 
 > [!IMPORTANT]
-> **Nouveauté :** L'application utilise désormais **Zone-Telechargement** comme source principale. 
-> Cela signifie que la recherche, les tendances, les films ET les séries sont désormais **100% gratuits et sans aucun token**. 
-> Hydracker reste disponible comme source secondaire dans les paramètres si vous possédez un token.
+> **Nouveauté :** L'application utilise désormais **Zone-Telechargement** comme source principale.   
+> Cela signifie que la recherche, les tendances, les films ET les séries sont désormais **100% gratuits et sans aucun token**.   
+> Hydracker reste disponible comme source secondaire dans les paramètres si vous possédez un token.  
 > **Mise à jour :** Une nouvelle source **LocalDB** (Base de données locale hors-ligne) a été intégrée pour des recherches ultra-rapides et un accès à une myriade de médias (Films, Séries, Jeux, Logiciels, Musique, etc.).  
-> [📥 Télécharger la base de données (Lien temporaire)](#)
+> La db est au même endroit que la vidéo tuto ;) au dessus
 
 ## ✨ Fonctionnalités
 
