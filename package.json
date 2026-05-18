@@ -1,15 +1,16 @@
 {
   "name": "hydrhacked",
-  "version": "1.0.0",
+  "version": "1.4.0",
   "type": "module",
   "description": "Hydr'Hacked - API Proxy and Frontend",
   "main": "server.js",
   "scripts": {
-    "start": "node dist/src/index.js",
+    "start": "node --experimental-sqlite dist/src/index.js",
     "build": "tsc",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx --experimental-sqlite src/index.ts"
   },
   "dependencies": {
+    "better-sqlite3": "^12.10.0",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

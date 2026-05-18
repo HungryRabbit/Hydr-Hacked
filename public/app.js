@@ -161,6 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.activeSources = statusData.activeSources || [];
             state.availableSources = statusData.availableSources || [];
             renderSourcesUI();
+            updateLocalDbFiltersVisibility();
         } catch(e) { console.error('Erreur détection source:', e); }
 
         loadTrending();
@@ -187,6 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     loadTrending();
                 }
                 wasOffline = s.isOffline;
+                updateLocalDbFiltersVisibility();
             } catch (e) {
                 wasOffline = true;
                 updateSiteStatusUI(true, 'Connexion au serveur perdue...');
@@ -237,11 +239,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // --- UI UPDATES ---
+    function updateLocalDbFiltersVisibility() {
+        const hasLocalDb = state.activeSources.includes('localdb');
+        document.querySelectorAll('.localdb-filter').forEach(el => {
+            if (hasLocalDb) {
+                el.classList.remove('hidden');
+            } else {
+                el.classList.add('hidden');
+                // If a hidden radio is checked, default back to 'film'
+                const radio = el.querySelector('input[type="radio"]');
+                if (radio && radio.checked) {
+                    const defaultRadio = document.querySelector('input[name="search-type"][value="film"]');
+                    if (defaultRadio) defaultRadio.checked = true;
+                }
+            }
+        });
+    }
+
     async function updateActiveSources(sources) {
         try {
             const res = await apiCall('/set-sources', 'POST', { sources });
             state.activeSources = res.activeSources;
             renderSourcesUI();
+            updateLocalDbFiltersVisibility();
             showToast('Sources mises à jour');
             loadTrending();
         } catch(e) {

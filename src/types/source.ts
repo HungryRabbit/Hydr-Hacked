@@ -1,4 +1,4 @@
-export type MediaType = 'movie' | 'series' | 'anime';
+export type MediaType = 'movie' | 'series' | 'anime' | 'book' | 'game' | 'software' | 'music' | 'other';
 
 export interface SearchResult {
     title: string;

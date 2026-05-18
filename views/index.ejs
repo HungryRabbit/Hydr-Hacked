@@ -107,7 +107,10 @@
                         <input type="text" id="search-input" placeholder="Titre du film, série...">
                         <button id="btn-search-trigger" class="btn-search-action">Go</button>
                     </div>
-                    <div class="filter-pills">
+                    <p style="font-size: 0.8rem; color: var(--text-sec); margin-top: 8px; text-align: center;">
+                        ⚠️ <i>Recherche stricte (LocalDB) : Saisissez exactement le titre du film/série recherché.</i>
+                    </p>
+                    <div class="filter-pills" style="margin-top: 15px;" id="search-filters-container">
                         <label class="pill">
                             <input type="radio" name="search-type" value="film" checked>
                             <span>Films</span>
@@ -115,6 +118,26 @@
                         <label class="pill">
                             <input type="radio" name="search-type" value="serie">
                             <span>Séries</span>
+                        </label>
+                        <label class="pill localdb-filter hidden">
+                            <input type="radio" name="search-type" value="game">
+                            <span>Jeux</span>
+                        </label>
+                        <label class="pill localdb-filter hidden">
+                            <input type="radio" name="search-type" value="software">
+                            <span>Logiciels</span>
+                        </label>
+                        <label class="pill localdb-filter hidden">
+                            <input type="radio" name="search-type" value="book">
+                            <span>Livres/BD</span>
+                        </label>
+                        <label class="pill localdb-filter hidden">
+                            <input type="radio" name="search-type" value="music">
+                            <span>Musique</span>
+                        </label>
+                        <label class="pill localdb-filter hidden">
+                            <input type="radio" name="search-type" value="other">
+                            <span>Autres</span>
                         </label>
                     </div>
                 </div>

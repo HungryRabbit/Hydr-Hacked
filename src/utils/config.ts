@@ -20,6 +20,9 @@ export const CONFIG = {
     HYDRACKER_URL: process.env.HYDRACKER_URL,
     HYDRACKER_API_KEY: process.env.HYDRACKER_API_KEY,
 
+    // Local Database (optionnel)
+    DB_PATH: process.env.DB_PATH || './database/darkiworld.db',
+
     // App
     API_PASSWORD: process.env.API_PASSWORD || DEV_API_PASSWORD,
     JD_HOST: process.env.JD_HOST,

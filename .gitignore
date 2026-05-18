@@ -5,3 +5,5 @@ sessions/
 *.crawljob
 /downloads/
 dist/
+database/darkiworld.db
+scripts/

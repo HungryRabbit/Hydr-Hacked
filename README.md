@@ -18,10 +18,13 @@
 > **Nouveauté :** L'application utilise désormais **Zone-Telechargement** comme source principale. 
 > Cela signifie que la recherche, les tendances, les films ET les séries sont désormais **100% gratuits et sans aucun token**. 
 > Hydracker reste disponible comme source secondaire dans les paramètres si vous possédez un token.
+> **Mise à jour :** Une nouvelle source **LocalDB** (Base de données locale hors-ligne) a été intégrée pour des recherches ultra-rapides et un accès à une myriade de médias (Films, Séries, Jeux, Logiciels, Musique, etc.).  
+> [📥 Télécharger la base de données (Lien temporaire)](#)
 
 ## ✨ Fonctionnalités
 
 - 🔍 **Recherche & Tendances** : Chercher vos films et séries ou récupérer les tendances.
+- 🗄️ **Base de Données Locale** : Recherche instantanée et hors-ligne grâce au plugin natif LocalDB.
 - 💻 **Interface web** : Interface web moderne et responsive (Dark Mode, animations fluides).
 - 🔗 **Affichage des liens** : Copier-coller le lien final s'affiche en un clic. 
 - ⚡ **Intégration JDownloader** : Envoi automatique des liens vers votre instance JDownloader (si activé dans les paramètres).
@@ -30,11 +33,12 @@
 
 | Fonctionnalité | 100% gratuit |
 |---|---|
-| 🔍 Recherche | ✅ Gratuit (ZT) |
+| 🔍 Recherche | ✅ Gratuit (ZT / LocalDB) |
 | 🔥 Tendances | ✅ Gratuit (ZT) |
-| 🎬 Films (liens 1fichier) | ✅ Gratuit (ZT) |
+| 🎬 Films (liens 1fichier) | ✅ Gratuit (ZT / LocalDB) |
 | 🖼️ Affiches (posters) | ✅ Gratuit (proxy intégré) |
-| 📺 Séries (liens 1fichier) | ✅ Gratuit (via ZT) |
+| 📺 Séries (liens 1fichier) | ✅ Gratuit (ZT / LocalDB) |
+| 🎮 Jeux / Logiciels / Ebooks | ✅ Gratuit (LocalDB uniquement) |
 
 
 ---
@@ -112,6 +116,7 @@ Créez un fichier `.env` à la racine du projet et configurez les variables suiv
 | `SECRET` | **Requis** | Clé secrète pour les sessions. |
 | `HYDRACKER_API_KEY` | Optionnel | Votre token Hydracker. |
 | `PORT` | Optionnel | Port de l'application (Défaut : `3067`). |
+| `DB_PATH` | Optionnel | Chemin vers la base locale (Défaut : `./database/darkiworld.db`). |
 | `JD_HOST` | Optionnel | IP/Hôte de JDownloader. |
 | `JD_API_PORT` | Optionnel | Port API de JDownloader (Défaut : `3128`). |
 
