@@ -1,6 +1,7 @@
 import express from 'express';
 import { globalState, getActiveSources, checkSiteStatus } from '../utils/state.js';
 import { sourceRegistry } from '../core/registry.js';
+
 import apiLimiter from '../utils/rateLimiter.js';
 import authMiddleware from '../utils/authMiddleware.js';
 import { sendToJDownloader } from '../utils/jdownloader.js';
@@ -204,6 +205,29 @@ router.post('/get-link', apiLimiter, authMiddleware, async (req, res) => {
     } catch (error: any) {
         console.error("Erreur /get-link:", error.message);
         res.status(500).json({ error: `Erreur serveur: ${error.message}` });
+    }
+});
+
+// ========================= MOVIEX DECODE =========================
+
+router.get('/movix-decode/:lienId', async (req, res) => {
+    try {
+        const { lienId } = req.params;
+        const sourceHydracker = sourceRegistry.get('hydracker') as any;
+        
+        if (!sourceHydracker) {
+            return res.status(400).json({ error: "Le plugin Hydracker n'est pas actif." });
+        }
+
+        const link = await sourceHydracker.resolveMovixLink(lienId);
+        
+        if (link) {
+            res.json({ success: true, link });
+        } else {
+            res.status(404).json({ error: "Impossible de débrider ce lien via Movix." });
+        }
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
     }
 });
 

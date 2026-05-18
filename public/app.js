@@ -556,14 +556,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const handleSelection = async (movie) => {
         showModal(movie.title, '<div class="loader-wrapper"><div class="loader"></div></div>');
         try {
-            // For ZT source, always use /select-movie with the full page URL
-            // For Hydracker, use /select-trending if it's from the trending endpoint
             let ep = '/select-movie';
             if (movie.source === 'hydracker' && movie.hrefPath && movie.hrefPath.includes('download')) {
                 ep = '/select-trending';
             }
             const data = await apiCall(ep, 'POST', { hrefPath: movie.hrefPath || '', title: movie.title, type: movie.type, source: movie.source });
-            renderModalOptions(data, movie.title);
+            // Ajout du 3ème argument : movie.source
+            renderModalOptions(data, movie.title, movie.source);
         } catch (e) {
             dom('modal-body').innerHTML = `<p style="color:red">${e.message}</p>`;
         }
@@ -588,7 +587,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return 3;
     };
 
-    const renderModalOptions = (data, currentTitle = '') => {
+    const renderModalOptions = (data, currentTitle = '', source = '') => {
         const body = dom('modal-body');
         body.innerHTML = '';
 
@@ -670,9 +669,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         body.innerHTML = '<div class="loader-wrapper"><div class="loader"></div></div>';
                         try {
                             const res = await apiCall('/select-season', 'POST', { seasonValue: opt.value });
-                            res.seasons = data.seasons; // Keep seasons list
+                            res.seasons = data.seasons;
                             
-                            // Update modal title to reflect new season
                             const baseTitle = currentTitle.split(' - ')[0];
                             const newTitle = (groupName.startsWith('Saison') || groupName.startsWith('Intégrale')) 
                                 ? `${baseTitle} - ${groupName}` 
@@ -682,8 +680,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (titleEl) titleEl.textContent = newTitle;
                             console.log(`[Modal] Titre mis à jour : ${newTitle}`);
 
-                            
-                            renderModalOptions(res, newTitle);
+                            renderModalOptions(res, newTitle, source);
                         } catch (e) {
                             body.innerHTML = `<p style="color:red; padding:1rem;">Erreur: ${e.message}</p>`;
                         }
@@ -788,14 +785,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 hostHeader.textContent = hostDisplay;
                 filesContainer.appendChild(hostHeader);
 
-                // For series, we might have many episodes. For movies, usually just mirrors.
-                // We'll use a grid for series episodes to save space.
+                
                 const itemsGrid = document.createElement('div');
                 itemsGrid.className = isActuallySeries ? "seasons-grid" : "files-list";
                 filesContainer.appendChild(itemsGrid);
 
                 items.forEach((q, idx) => {
-                    const btn = document.createElement('button');
+                    const row = document.createElement('div');
                     let specialClass = '';
                     let rankIcon = '';
                     
@@ -807,17 +803,76 @@ document.addEventListener('DOMContentLoaded', () => {
                         ? (q.isFullSeason || !/^\d+$/.test(q.episode) ? q.episode : `Ep. ${q.episode}`)
                         : "Télécharger";
 
+                    // On vérifie si la source est Hydracker
+                    const isHydracker = source === 'hydracker';
+
                     if (isActuallySeries) {
-                        btn.className = `quality-pill ${specialClass}`;
-                        btn.style.padding = "10px 14px";
-                        btn.innerHTML = `
-                            ${rankIcon ? `<span style="margin-right:5px">${rankIcon}</span>` : ''}
-                            <span>${episodeLabel}</span>
+                        row.className = `quality-pill ${specialClass}`;
+                        row.style.display = 'flex';
+                        row.style.justifyContent = 'space-between';
+                        row.style.alignItems = 'center';
+                        row.style.padding = "8px 14px";
+                        row.style.cursor = "default";
+                        
+                        let buttonsHtml = '';
+                        if (isHydracker) {
+                            buttonsHtml = `
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <button class="btn-action btn-movix" title="Lien Direct (Movix)" style="background: rgba(139, 92, 246, 0.2); border: 1px solid rgba(139, 92, 246, 0.5); color: #8b5cf6; border-radius: 6px; padding: 4px 8px; cursor: pointer; display: flex; align-items: center; transition: all 0.2s;">
+                                        <i data-lucide="zap" style="width: 16px; height: 16px;"></i>
+                                    </button>
+                                    <button class="btn-action btn-dl" title="Télécharger classique" style="background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.1); color: white; border-radius: 6px; padding: 4px 8px; cursor: pointer; display: flex; align-items: center; transition: all 0.2s;">
+                                        <i data-lucide="download" style="width: 16px; height: 16px;"></i>
+                                    </button>
+                                </div>
+                            `;
+                        } else {
+                            buttonsHtml = `
+                                <button class="btn-action btn-dl" title="Télécharger" style="background: transparent; border: none; color: white; cursor: pointer; display: flex; align-items: center;">
+                                    <i data-lucide="download" style="width: 18px; height: 18px;"></i>
+                                </button>
+                            `;
+                        }
+
+                        row.innerHTML = `
+                            <div style="display: flex; align-items: center;">
+                                ${rankIcon ? `<span style="margin-right:5px">${rankIcon}</span>` : ''}
+                                <span>${episodeLabel}</span>
+                            </div>
+                            ${buttonsHtml}
                         `;
                     } else {
-                        btn.className = `file-btn ${specialClass}`;
+                        row.className = `file-btn ${specialClass}`;
+                        row.style.cursor = "default";
+                        row.style.display = 'flex';
+                        row.style.justifyContent = 'space-between';
+                        row.style.alignItems = 'center';
+
                         const mirrorLabel = items.length > 1 ? ` <span class="mirror-tag">Miroir ${idx + 1}</span>` : '';
-                        btn.innerHTML = `
+                        
+                        let buttonsHtml = '';
+                        if (isHydracker) {
+                            buttonsHtml = `
+                                <div class="file-btn-right" style="display: flex; gap: 8px; align-items: center;">
+                                    <button class="btn-action btn-movix" title="Lien Direct (Movix)" style="background: rgba(139, 92, 246, 0.15); border: 1px solid #8b5cf6; color: #8b5cf6; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 600; transition: all 0.2s;">
+                                        <i data-lucide="zap" style="width: 16px; height: 16px;"></i> Direct
+                                    </button>
+                                    <button class="btn-action btn-dl" title="Télécharger classique" style="background: rgba(255, 255, 255, 0.1); border: none; color: white; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; transition: all 0.2s;">
+                                        <i data-lucide="download" style="width: 16px; height: 16px;"></i>
+                                    </button>
+                                </div>
+                            `;
+                        } else {
+                            buttonsHtml = `
+                                <div class="file-btn-right">
+                                    <button class="btn-action btn-dl" title="Télécharger" style="background: transparent; border: none; color: white; cursor: pointer;">
+                                        <i data-lucide="download" class="dl-icon-btn"></i>
+                                    </button>
+                                </div>
+                            `;
+                        }
+
+                        row.innerHTML = `
                             <div class="file-btn-left">
                                 <div class="file-host">
                                     ${rankIcon ? `<span class="rank-icon">${rankIcon}</span>` : ''}
@@ -827,13 +882,43 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </div>
                                 <div class="file-size">${q.size && q.size !== 'N/A' ? q.size : 'Taille inconnue'}</div>
                             </div>
-                            <div class="file-btn-right">
-                                <i data-lucide="download" class="dl-icon-btn"></i>
-                            </div>
+                            ${buttonsHtml}
                         `;
                     }
 
-                    btn.onclick = async () => {
+                    // On attache l'event listener Movix UNIQUEMENT si on est sur Hydracker
+                    if (isHydracker) {
+                        row.querySelector('.btn-movix').onclick = async (e) => {
+                            e.stopPropagation();
+                            hide(dom('modal-overlay'));
+                            toggleBlockingLoader(true, "Débridage Movix en cours...");
+                            try {
+                                const result = await apiCall(`/movix-decode/${q.id}`, 'GET');
+                                toggleBlockingLoader(false);
+
+                                if (result.link) {
+                                    showModal('Lien Direct Movix', `
+                                        <div class="direct-link-box">
+                                            <p style="margin-bottom: 10px;">Voici votre lien direct rapide :</p>
+                                            <input type="text" value="${result.link}" readonly id="direct-link-input" style="width: 100%; margin-bottom: 15px;">
+                                            <div class="btn-group" style="display: flex; gap: 10px;">
+                                                <button class="btn-primary" style="flex: 1;" onclick="document.getElementById('direct-link-input').select(); document.execCommand('copy'); showToast('Copié !')">Copier</button>
+                                                <a href="${result.link}" target="_blank" class="btn-success" style="flex: 1; text-align: center; text-decoration: none; display: inline-block;">Ouvrir</a>
+                                            </div>
+                                        </div>
+                                    `);
+                                }
+                            } catch (err) {
+                                toggleBlockingLoader(false);
+                                showToast("Erreur Movix: " + err.message);
+                                show(dom('modal-overlay'));
+                            }
+                        };
+                    }
+
+                    // L'event listener classique fonctionne pour toutes les sources
+                    row.querySelector('.btn-dl').onclick = async (e) => {
+                        e.stopPropagation();
                         hide(dom('modal-overlay'));
                         toggleBlockingLoader(true, "Récupération du lien...");
                         try {
@@ -845,24 +930,30 @@ document.addEventListener('DOMContentLoaded', () => {
                                 showToast('Lien envoyé à JDownloader !');
                                 document.querySelector('.nav-links li[data-target="section-downloads"]').click();
                             } else {
-                                showModal('Lien Direct Récupéré', `
+                                showModal('Lien Direct', `
                                     <div class="direct-link-box">
-                                        <p>Voici votre lien de téléchargement :</p>
-                                        <input type="text" value="${result.link}" readonly id="direct-link-input">
-                                        <div class="btn-group">
-                                            <button class="btn-primary" onclick="document.getElementById('direct-link-input').select(); document.execCommand('copy'); showToast('Copié !')">Copier</button>
-                                            <a href="${result.link}" target="_blank" class="btn-success">Ouvrir</a>
+                                        <p style="margin-bottom: 10px;">Voici votre lien de téléchargement :</p>
+                                        <input type="text" value="${result.link}" readonly id="direct-link-input" style="width: 100%; margin-bottom: 15px;">
+                                        <div class="btn-group" style="display: flex; gap: 10px;">
+                                            <button class="btn-primary" style="flex: 1;" onclick="document.getElementById('direct-link-input').select(); document.execCommand('copy'); showToast('Copié !')">Copier</button>
+                                            <a href="${result.link}" target="_blank" class="btn-success" style="flex: 1; text-align: center; text-decoration: none; display: inline-block;">Ouvrir</a>
                                         </div>
                                     </div>
                                 `);
                             }
-                        } catch (e) {
+                        } catch (err) {
                             toggleBlockingLoader(false);
-                            showToast("Erreur: " + e.message);
+                            showToast("Erreur: " + err.message);
                             show(dom('modal-overlay'));
                         }
                     };
-                    itemsGrid.appendChild(btn);
+                    
+                    row.querySelectorAll('.btn-action').forEach(b => {
+                        b.addEventListener('mouseover', () => b.style.transform = 'scale(1.05)');
+                        b.addEventListener('mouseout', () => b.style.transform = 'scale(1)');
+                    });
+
+                    itemsGrid.appendChild(row);
                 });
             });
 

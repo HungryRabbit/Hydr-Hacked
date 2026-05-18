@@ -101,13 +101,44 @@ export class HydrackerAPI implements ISource {
         return parseSeasons(result);
     }
 
+    private isPremiumCache: boolean | null = null;
+    private premiumCheckPromise: Promise<boolean> | null = null;
+
+    async checkPremiumStatus(): Promise<boolean> {
+        if (this.isPremiumCache !== null) return this.isPremiumCache;
+        if (this.premiumCheckPromise) return this.premiumCheckPromise;
+
+        this.premiumCheckPromise = (async () => {
+            try {
+                const result = await apiGet('users/me');
+                if (result && result.user) {
+                    this.isPremiumCache = !!result.user.IsPremium;
+                    console.log(`[Hydracker] Statut Premium vérifié: ${this.isPremiumCache ? 'OUI' : 'NON'}`);
+                    return this.isPremiumCache;
+                }
+            } catch (e: any) {
+                console.error('[Hydracker] Erreur vérification Premium:', e.message);
+            }
+            return false;
+        })();
+
+        return await this.premiumCheckPromise;
+    }
+
     async resolveLink(linkId: string): Promise<string | null> {
-        const maxRetries = 5;
+        const isPremium = await this.checkPremiumStatus();
+        
+        if (!isPremium) {
+            console.log(`[Hydracker] Compte non Premium détecté. Bypass de Hydracker, passage direct à Movix...`);
+            return await this.resolveMovixLink(linkId);
+        }
+
+        const maxRetries = 4;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 if (attempt > 1) {
                     console.log(`[Hydracker] Retry ${attempt}/${maxRetries} for lien ${linkId}`);
-                    await new Promise(r => setTimeout(r, 5000));
+                    await new Promise(r => setTimeout(r, 4000));
                 }
 
                 const result = await apiGet(`content/liens/${linkId}`);
@@ -123,7 +154,46 @@ export class HydrackerAPI implements ISource {
                 console.error(`[Hydracker] Exception resolving lien ${linkId} (attempt ${attempt}):`, e.message);
             }
         }
-        return null;
+        
+        console.log(`[Hydracker] Échec de la résolution classique (Erreur). Fallback automatique via Movix...`);
+        return await this.resolveMovixLink(linkId);
+    }
+
+    async resolveMovixLink(lienId: string, titleId?: string): Promise<string | null> {
+        try {
+            console.log(`[Hydracker] Tentative de débridage Movix pour le lien ${lienId}...`);
+            const url = `https://api.movix.tax/api/darkiworld/decode/${lienId}${titleId ? `?title_id=${titleId}` : ''}`;
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Referer': 'https://movix.tax/',
+                    'Origin': 'https://movix.tax',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                }
+            });
+
+            const data = await response.json();
+            
+            if (!response.ok || data.success === false) {
+                console.error('[Hydracker] Erreur API Movix:', data.error || 'Erreur inconnue');
+                return null;
+            }
+
+            // Récupération du lien direct selon le format de réponse Movix
+            const directUrl = data.directDL || data.direct_url || 
+                             (data.embed_url && (data.embed_url.directDL || data.embed_url.src || data.embed_url.lien));
+            
+            if (directUrl) {
+                console.log(`[Hydracker] Movix a résolu le lien avec succès !`);
+                return directUrl;
+            }
+
+            return null;
+        } catch (e: any) {
+            console.error(`[Hydracker] Exception lors de la résolution Movix :`, e.message);
+            return null;
+        }
     }
 }
 
