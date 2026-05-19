@@ -519,6 +519,41 @@ input:-webkit-autofill:active {
 .dl-icon-btn { width: 18px; height: 18px; }
 
 /* --- SEASON GROUPING --- */
+.season-select-wrap {
+    margin-bottom: 1.5rem;
+}
+
+.season-select {
+    width: 100%;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background: rgba(255, 255, 255, 0.04) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23bbb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>") right 14px center / 14px no-repeat;
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 12px 38px 12px 14px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s;
+}
+
+.season-select:hover {
+    border-color: rgba(255, 255, 255, 0.25);
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.season-select:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.season-select option {
+    background: #1a1a1a;
+    color: white;
+}
+
 .season-group {
     margin-bottom: 1.5rem;
     background: rgba(255, 255, 255, 0.02);

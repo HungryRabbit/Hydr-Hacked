@@ -734,89 +734,130 @@ document.addEventListener('DOMContentLoaded', () => {
             h4.className = "modal-subtitle";
             body.appendChild(h4);
 
-            const groupedSeasons = new Map();
-            
-            // Flatten and collect all season options
+            // Flatten labels — handles ZT's occasional "Saison 1 Saison 2"-style joined labels.
+            const flatOptions = [];
             data.seasons.forEach(s => {
                 let labelsToProcess = [];
-                // Handle cases where ZT might combine multiple seasons in one label
                 if ((s.label.match(/Saison/ig) || []).length > 1) {
                     labelsToProcess = s.label.split(/(?=Saison\s*\d+)/i).filter(Boolean);
                 } else {
                     labelsToProcess = [s.label];
                 }
-
                 labelsToProcess.forEach(label => {
-                    const cleanLabel = label.trim();
-                    // Detect season group: "Saison 1 HDTV (FRENCH)" -> group "Saison 1", sublabel "HDTV (FRENCH)"
+                    flatOptions.push({ fullLabel: label.trim(), value: s.value });
+                });
+            });
+
+            // Common handler for both UIs.
+            const onSeasonChosen = async (selectedValue, displayLabel) => {
+                renderLoader(body);
+                try {
+                    const res = await apiCall('/select-season', 'POST', { seasonValue: selectedValue });
+                    res.seasons = data.seasons;
+
+                    const baseTitle = currentTitle.split(' - ')[0];
+                    const newTitle = displayLabel ? `${baseTitle} - ${displayLabel}` : currentTitle;
+
+                    const selectionTitleEl = dom('selection-title');
+                    if (selectionTitleEl) selectionTitleEl.textContent = newTitle;
+                    const modalTitleEl = dom('modal-title');
+                    if (modalTitleEl) modalTitleEl.textContent = newTitle;
+
+                    renderModalOptions(res, newTitle, source, opts);
+                    if (window.lucide) window.lucide.createIcons();
+                } catch (e) {
+                    body.replaceChildren();
+                    const errP = document.createElement('p');
+                    errP.style.color = 'red';
+                    errP.style.padding = '1rem';
+                    errP.textContent = `Erreur: ${e.message}`;
+                    body.appendChild(errP);
+                }
+            };
+
+            if (isActuallySeries) {
+                // Series: single <select> dropdown, auto-select Saison 1 (or the
+                // first option as a fallback when "Saison 1" isn't present).
+                const wrap = document.createElement('div');
+                wrap.className = 'season-select-wrap';
+
+                const select = document.createElement('select');
+                select.className = 'season-select';
+                select.setAttribute('aria-label', 'Saison');
+
+                flatOptions.forEach((opt, i) => {
+                    const o = document.createElement('option');
+                    o.value = String(i); // stable index — opt.value can be a URL/number
+                    o.textContent = opt.fullLabel;
+                    select.appendChild(o);
+                });
+
+                let preferIdx = flatOptions.findIndex(o => /(^|\s)Saison\s*0*1(\b|$)/i.test(o.fullLabel) || o.value === 1 || o.value === '1');
+                if (preferIdx < 0) preferIdx = 0;
+                select.selectedIndex = preferIdx;
+
+                select.addEventListener('change', () => {
+                    const idx = parseInt(select.value, 10);
+                    const opt = flatOptions[idx];
+                    if (!opt) return;
+                    const seasonMatch = opt.fullLabel.match(/^(Saison\s*\d+)/i);
+                    const display = seasonMatch ? seasonMatch[1].trim() : opt.fullLabel;
+                    onSeasonChosen(opt.value, display);
+                });
+
+                wrap.appendChild(select);
+                body.appendChild(wrap);
+            } else {
+                // Movies / quality versions: keep the grouped pill layout — each
+                // group is a quality bucket the user picks one variant from.
+                const groupedSeasons = new Map();
+                flatOptions.forEach(({ fullLabel: cleanLabel, value }) => {
                     const seasonMatch = cleanLabel.match(/^(Saison\s*\d+)(.*)$/i);
                     let groupName = "Versions";
                     let subLabel = cleanLabel;
-
                     if (seasonMatch) {
                         groupName = seasonMatch[1].trim();
                         subLabel = seasonMatch[2].trim() || "Standard";
                     } else if (cleanLabel.toLowerCase().includes('intégrale')) {
                         groupName = "Intégrales";
                     } else if (cleanLabel.toLowerCase().includes('saison')) {
-                        // Cas particulier comme "Saisons 1 à 5"
                         groupName = cleanLabel;
                         subLabel = "Pack";
                     }
-
-
                     if (!groupedSeasons.has(groupName)) groupedSeasons.set(groupName, []);
-                    groupedSeasons.get(groupName).push({ label: subLabel, fullLabel: cleanLabel, value: s.value });
-                });
-            });
-
-            // Render grouped seasons
-            groupedSeasons.forEach((options, groupName) => {
-                const groupDiv = document.createElement('div');
-                groupDiv.className = "season-group";
-
-                const titleDiv = document.createElement('div');
-                titleDiv.className = "season-group-title";
-                titleDiv.textContent = groupName;
-                groupDiv.appendChild(titleDiv);
-
-                const grid = document.createElement('div');
-                grid.className = "seasons-grid";
-
-                options.forEach(opt => {
-                    const btn = document.createElement('button');
-                    btn.className = 'quality-pill';
-                    btn.innerHTML = `<span>${opt.label}</span>`;
-                    btn.title = opt.fullLabel;
-
-                    btn.onclick = async () => {
-                        body.innerHTML = '<div class="loader-wrapper"><div class="loader"></div></div>';
-                        try {
-                            const res = await apiCall('/select-season', 'POST', { seasonValue: opt.value });
-                            res.seasons = data.seasons;
-                            
-                            const baseTitle = currentTitle.split(' - ')[0];
-                            const newTitle = (groupName.startsWith('Saison') || groupName.startsWith('Intégrale')) 
-                                ? `${baseTitle} - ${groupName}` 
-                                : currentTitle;
-                            
-                            const titleEl = dom('modal-title');
-                            if (titleEl) titleEl.textContent = newTitle;
-                            console.log(`[Modal] Titre mis à jour : ${newTitle}`);
-
-                            renderModalOptions(res, newTitle, source, opts);
-                            if (window.lucide) window.lucide.createIcons();
-                        } catch (e) {
-                            body.innerHTML = `<p style="color:red; padding:1rem;">Erreur: ${e.message}</p>`;
-                        }
-                    };
-
-                    grid.appendChild(btn);
+                    groupedSeasons.get(groupName).push({ label: subLabel, fullLabel: cleanLabel, value });
                 });
 
-                groupDiv.appendChild(grid);
-                body.appendChild(groupDiv);
-            });
+                groupedSeasons.forEach((options, groupName) => {
+                    const groupDiv = document.createElement('div');
+                    groupDiv.className = "season-group";
+
+                    const titleDiv = document.createElement('div');
+                    titleDiv.className = "season-group-title";
+                    titleDiv.textContent = groupName;
+                    groupDiv.appendChild(titleDiv);
+
+                    const grid = document.createElement('div');
+                    grid.className = "seasons-grid";
+
+                    options.forEach(opt => {
+                        const btn = document.createElement('button');
+                        btn.className = 'quality-pill';
+                        const span = document.createElement('span');
+                        span.textContent = opt.label;
+                        btn.appendChild(span);
+                        btn.title = opt.fullLabel;
+                        btn.onclick = () => {
+                            const display = (groupName.startsWith('Saison') || groupName.startsWith('Intégrale')) ? groupName : '';
+                            onSeasonChosen(opt.value, display);
+                        };
+                        grid.appendChild(btn);
+                    });
+
+                    groupDiv.appendChild(grid);
+                    body.appendChild(groupDiv);
+                });
+            }
 
             const sep = document.createElement('hr');
             sep.className = 'modal-sep';
