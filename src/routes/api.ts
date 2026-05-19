@@ -22,6 +22,14 @@ router.get('/status', (req, res) => {
     });
 });
 
+router.get('/config-options', (req, res) => {
+    const localdb = sourceRegistry.get('localdb') as any;
+    if (localdb && typeof localdb.listConfigOptions === 'function') {
+        return res.json(localdb.listConfigOptions());
+    }
+    res.json({ qualities: { movies: [], series: [] }, hosts: [] });
+});
+
 router.get('/trending', (req, res) => {
     res.json({
         films: globalState.trendingFilms || [],

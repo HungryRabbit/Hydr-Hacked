@@ -158,6 +158,17 @@ document.addEventListener('DOMContentLoaded', () => {
             updateLocalDbFiltersVisibility();
         } catch(e) { console.error('Erreur détection source:', e); }
 
+        // --- Default-preference dropdowns (settings page) ---
+        // Populates the Hébergeur / Qualité Films / Qualité Séries selects
+        // from the LocalDB's distinct values. Persists picks to localStorage.
+        try {
+            const opts = await apiCall('/config-options');
+            state.configOptions = opts;
+            populateDefaultPrefs(opts);
+        } catch (e) {
+            console.error('Erreur /config-options:', e);
+        }
+
         const trendingHidden = updateTrendingVisibility();
 
         // --- JDownloader Toggle ---
@@ -273,6 +284,44 @@ document.addEventListener('DOMContentLoaded', () => {
             trendingNav.classList.remove('hidden');
         }
         return onlyLocaldb;
+    }
+
+    function populateDefaultPrefs(opts) {
+        const wire = (sel, items, storageKey, fallback) => {
+            const node = dom(sel);
+            if (!node) return;
+            node.replaceChildren();
+
+            // First entry is the "auto" sentinel — empty value means "use the
+            // first available option from whatever the selection page sees".
+            const autoOpt = document.createElement('option');
+            autoOpt.value = '';
+            autoOpt.textContent = 'Auto (premier disponible)';
+            node.appendChild(autoOpt);
+
+            (items || []).forEach(v => {
+                const o = document.createElement('option');
+                o.value = v;
+                o.textContent = v;
+                node.appendChild(o);
+            });
+
+            let saved = localStorage.getItem(storageKey);
+            if (saved === null && fallback && (items || []).includes(fallback)) {
+                saved = fallback;
+                localStorage.setItem(storageKey, fallback);
+            }
+            if (saved !== null && (saved === '' || (items || []).includes(saved))) {
+                node.value = saved;
+            }
+            node.addEventListener('change', () => {
+                localStorage.setItem(storageKey, node.value);
+            });
+        };
+
+        wire('setting-default-host',          opts.hosts,             'defaultHost',         '1Fichier');
+        wire('setting-default-quality-movie', opts.qualities.movies,  'defaultQualityMovie', null);
+        wire('setting-default-quality-series',opts.qualities.series,  'defaultQualitySeries',null);
     }
 
     function updateLocalDbFiltersVisibility() {
@@ -897,25 +946,77 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // --- 2a. BUILD VERSION TABS ---
-        // Gather unique versions from quality field
+        // --- 2a. QUALITY + HOST FILTER DROPDOWNS ---
         const allVersions = [...new Set(enriched.map(q => q.quality || 'Inconnu'))];
-
-        let activeVersion = allVersions[0];
 
         const h4files = document.createElement('h4');
         h4files.textContent = "Fichiers Disponibles";
         h4files.className = "modal-subtitle";
         body.appendChild(h4files);
 
-        // Version filter tabs (only if >1 version)
-        const versionTabsWrap = document.createElement('div');
-        versionTabsWrap.className = 'version-tabs';
-        body.appendChild(versionTabsWrap);
+        // Pick the initial quality from the user's settings preference if it
+        // exists in the current dataset; fall back to the first available.
+        const qualityPrefKey = isActuallySeries ? 'defaultQualitySeries' : 'defaultQualityMovie';
+        const savedQuality = localStorage.getItem(qualityPrefKey);
+        let activeVersion = (savedQuality && allVersions.includes(savedQuality))
+            ? savedQuality
+            : allVersions[0];
+
+        const filterRow = document.createElement('div');
+        filterRow.className = 'selection-filters';
+        body.appendChild(filterRow);
+
+        const buildFilter = (labelText, sel) => {
+            const wrap = document.createElement('div');
+            wrap.className = 'selection-filter';
+            const label = document.createElement('label');
+            label.textContent = labelText;
+            label.htmlFor = sel.id;
+            wrap.appendChild(label);
+            wrap.appendChild(sel);
+            return wrap;
+        };
+
+        const qualitySelect = document.createElement('select');
+        qualitySelect.className = 'season-select';
+        qualitySelect.id = 'filter-quality';
+        allVersions.forEach(v => {
+            const o = document.createElement('option');
+            o.value = v;
+            o.textContent = v;
+            qualitySelect.appendChild(o);
+        });
+        qualitySelect.value = activeVersion;
+        filterRow.appendChild(buildFilter('Qualité', qualitySelect));
+
+        const hostSelect = document.createElement('select');
+        hostSelect.className = 'season-select';
+        hostSelect.id = 'filter-host';
+        filterRow.appendChild(buildFilter('Hébergeur', hostSelect));
 
         const filesContainer = document.createElement('div');
         filesContainer.className = 'files-list';
         body.appendChild(filesContainer);
+
+        // Refresh host options every time the quality changes — hosts available
+        // for "Blu-Ray 1080p" aren't necessarily the same as for "WEB-DL 720p".
+        const refreshHostOptions = () => {
+            const subset = enriched.filter(q => (q.quality || 'Inconnu') === qualitySelect.value);
+            const hosts = [...new Set(subset.map(q => q.host || 'Inconnu'))].sort();
+            hostSelect.replaceChildren();
+            const all = document.createElement('option');
+            all.value = '';
+            all.textContent = 'Tous';
+            hostSelect.appendChild(all);
+            hosts.forEach(h => {
+                const o = document.createElement('option');
+                o.value = h;
+                o.textContent = h;
+                hostSelect.appendChild(o);
+            });
+            const preferred = localStorage.getItem('defaultHost') || '1Fichier';
+            hostSelect.value = hosts.includes(preferred) ? preferred : '';
+        };
 
         const renderSeriesTable = (parent, items) => {
             // Detect which optional columns have any data — empty ones are
@@ -976,10 +1077,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 thSel.appendChild(headerCb);
                 trHead.appendChild(thSel);
             }
+            // Qualité is intentionally omitted — the table is already filtered
+            // by the quality dropdown above, so the column would only ever
+            // hold the same value.
             const cols = [
                 { label: 'Épisode', cls: 'col-ep' },
                 ...(has.name  ? [{ label: 'Titre',       cls: 'col-name' }]    : []),
-                { label: 'Qualité', cls: 'col-quality' },
                 { label: 'Taille',  cls: 'col-size' },
                 ...(has.audio ? [{ label: 'Audio',       cls: 'col-audio' }]   : []),
                 ...(has.sub   ? [{ label: 'Sous-titres', cls: 'col-sub' }]     : []),
@@ -1064,11 +1167,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     td.textContent = q.episodeName || '—';
                     tr.appendChild(td);
                 }
-
-                const qualTd = document.createElement('td');
-                qualTd.className = 'col-quality';
-                qualTd.textContent = q.quality || '—';
-                tr.appendChild(qualTd);
 
                 const sizeTd = document.createElement('td');
                 sizeTd.className = 'col-size';
@@ -1167,16 +1265,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.lucide) window.lucide.createIcons();
         };
 
-        const renderFiles = (version) => {
+        const renderFiles = () => {
             filesContainer.replaceChildren();
-            const toShow = allVersions.length > 1
-                ? enriched.filter(q => (q.quality || 'Inconnu') === version)
-                : enriched;
+            const selectedQuality = qualitySelect.value;
+            const selectedHost = hostSelect.value;
+            const toShow = enriched.filter(q =>
+                (q.quality || 'Inconnu') === selectedQuality &&
+                (!selectedHost || (q.host || 'Inconnu') === selectedHost)
+            );
 
             if (toShow.length === 0) {
                 const p = document.createElement('p');
                 p.className = 'empty-msg';
-                p.textContent = 'Aucun fichier pour cette version.';
+                p.textContent = 'Aucun fichier pour cette combinaison qualité / hébergeur.';
                 filesContainer.appendChild(p);
                 return;
             }
@@ -1431,23 +1532,14 @@ document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();
         };
 
-        if (allVersions.length > 1) {
-            allVersions.forEach(version => {
-                const tab = document.createElement('button');
-                tab.className = 'version-tab';
-                tab.textContent = version;
-                if (version === activeVersion) tab.classList.add('active');
-                tab.onclick = () => {
-                    activeVersion = version;
-                    versionTabsWrap.querySelectorAll('.version-tab').forEach(t => t.classList.remove('active'));
-                    tab.classList.add('active');
-                    renderFiles(version);
-                };
-                versionTabsWrap.appendChild(tab);
-            });
-        }
+        qualitySelect.addEventListener('change', () => {
+            refreshHostOptions();
+            renderFiles();
+        });
+        hostSelect.addEventListener('change', renderFiles);
 
-        renderFiles(activeVersion);
+        refreshHostOptions();
+        renderFiles();
     };
 
 

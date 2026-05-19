@@ -554,6 +554,33 @@ input:-webkit-autofill:active {
     color: white;
 }
 
+.selection-filters {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+
+.selection-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    flex: 1;
+    min-width: 180px;
+}
+
+.selection-filter label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.selection-filter .season-select {
+    margin-bottom: 0;
+}
+
 .episodes-table {
     width: 100%;
     border-collapse: separate;

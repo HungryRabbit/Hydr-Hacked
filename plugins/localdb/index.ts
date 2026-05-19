@@ -367,6 +367,41 @@ export class LocalDatabaseAPI implements ISource {
         return [];
     }
 
+    // Distinct quality/host values from the DB, grouped by media bucket.
+    // Cached after the first call — the underlying data is static.
+    private optionsCache: { qualities: { movies: string[]; series: string[] }; hosts: string[] } | null = null;
+    listConfigOptions(): { qualities: { movies: string[]; series: string[] }; hosts: string[] } {
+        if (this.optionsCache) return this.optionsCache;
+        const empty = { qualities: { movies: [] as string[], series: [] as string[] }, hosts: [] as string[] };
+        if (!this.initDb()) return empty;
+        try {
+            const movieCats  = ['Films', 'Animes', 'Films et series', 'Documentaire', 'Spectacle'];
+            const seriesCats = ['Séries', 'Animes', 'Téléréalité', 'Émissions TV', 'Mangas'];
+            const sql = (cats: string[]) => `
+                SELECT DISTINCT quality_name FROM links_small
+                WHERE category_name IN (${cats.map(() => '?').join(',')})
+                  AND quality_name IS NOT NULL AND quality_name != ''
+                ORDER BY quality_name`;
+            const pick = (cats: string[]): string[] =>
+                this.db.prepare(sql(cats)).all(...cats).map((r: any) => r.quality_name);
+
+            const hosts = this.db.prepare(
+                `SELECT DISTINCT host_name FROM links_small
+                 WHERE host_name IS NOT NULL AND host_name != ''
+                 ORDER BY host_name`
+            ).all().map((r: any) => r.host_name);
+
+            this.optionsCache = {
+                qualities: { movies: pick(movieCats), series: pick(seriesCats) },
+                hosts,
+            };
+            return this.optionsCache;
+        } catch (e: any) {
+            console.error('[LocalDB] listConfigOptions error:', e.message);
+            return empty;
+        }
+    }
+
     private parseIdentifier(identifier: string): { tmdbId: number; titleName: string } {
         const parts = identifier.split(':');
         if (parts[0] === 'localdb') {
@@ -488,7 +523,11 @@ export class LocalDatabaseAPI implements ISource {
                 if (seasonValue) {
                     currentSeason = parseInt(String(seasonValue), 10) || 1;
                 } else if (seasonsRows.length > 0) {
-                    currentSeason = seasonsRows[0].season_number;
+                    // Prefer season 1 if it exists (matches the UI's auto-selected
+                    // dropdown option); otherwise fall back to the lowest season
+                    // number — usually "Saison 0" specials.
+                    const hasSeason1 = seasonsRows.some((r: any) => r.season_number === 1);
+                    currentSeason = hasSeason1 ? 1 : seasonsRows[0].season_number;
                 }
             }
 
