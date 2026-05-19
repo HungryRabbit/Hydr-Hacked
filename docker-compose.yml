@@ -1,19 +1,104 @@
 services:
   hydrhacked:
-    image: ghcr.io/nonobzh22/hydr-hacked:latest
+    # Build the image locally from the Dockerfile in this repo.
+    # Pin a fixed tag so `docker compose up` doesn't accidentally rebuild
+    # silently when the Dockerfile changes — bump it when you rebuild.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # image: hydr-hacked:local
     container_name: hydrhacked_app
     restart: unless-stopped
+
+    # Bind to loopback only — never expose this on the LAN.
     ports:
-      - "${PORT:-3067}:${PORT:-3067}"
+      - "127.0.0.1:${PORT:-3067}:${PORT:-3067}"
 
     env_file:
       - .env
-    volumes:
-      - ./sessions:/app/sessions
-      - ./downloads:/downloads
-      - ./images:/app/images
 
-    deploy:
-      resources:
-        limits:
-          memory: 512M
+    # ── Process / privileges ───────────────────────────────────────────
+    # Dockerfile already sets USER hydr (1000:1000); this is a belt-and-
+    # suspenders override that survives image-layer mistakes.
+    user: "1000:1000"
+
+    # Use docker's bundled tini as PID 1 — proper signal forwarding and
+    # zombie reaping without needing dumb-init in the image.
+    init: true
+
+    # Drop every Linux capability — a Node HTTP server needs none.
+    cap_drop:
+      - ALL
+
+    # Block privilege escalation via setuid binaries / file caps.
+    security_opt:
+      - no-new-privileges:true
+
+    # Prevent fork bombs / runaway worker creation.
+    pids_limit: 256
+
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+      nproc: 256
+
+    # ── Filesystem ─────────────────────────────────────────────────────
+    # /app is immutable. Writes only land in the bind mounts below or in
+    # /tmp + /run (tmpfs). If the container fails to start, add the
+    # offending path as another tmpfs entry rather than disabling this.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+      - /run:size=8m,mode=1777,noexec,nosuid,nodev
+
+    volumes:
+      # Sessions store (express-session file store writes here).
+      - ./sessions:/app/sessions
+      # Downloads land here.
+      - ./downloads:/downloads
+      # UI assets — read-only is enough, the app only serves them.
+      - ./images:/app/images:ro
+      # LocalDB plugin: SQLite file lives on the host. Mounted RW because
+      # node:sqlite may create -journal / -wal / -shm sidecar files even
+      # for read-only queries.
+      - ./database:/app/database
+
+    # ── Resources ──────────────────────────────────────────────────────
+    # Raised to 1G because the LocalDB plugin loads a 104K-title index
+    # into memory on first search; 512M leaves no headroom for SQLite's
+    # mmap + page cache and the kernel OOM-kills the process.
+    mem_limit: 1g
+    mem_reservation: 256m
+    memswap_limit: 1g
+    cpus: 1.0
+    oom_kill_disable: false
+
+    # ── Logging ────────────────────────────────────────────────────────
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # ── Health ─────────────────────────────────────────────────────────
+    # /status is unauthenticated and cheap; good liveness probe.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "node -e \"require('http').get('http://127.0.0.1:'+(process.env.PORT||3067)+'/status',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))\""
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    # ── Network ────────────────────────────────────────────────────────
+    networks:
+      - hydrhacked_net
+
+# Dedicated bridge so the container cannot reach unrelated containers.
+networks:
+  hydrhacked_net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
