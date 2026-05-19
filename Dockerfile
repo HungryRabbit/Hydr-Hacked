@@ -8,7 +8,7 @@
 #   - has build tools available in case better-sqlite3 cannot find a
 #     prebuilt binary for the target platform; these never reach runtime
 # ──────────────────────────────────────────────────────────────────────
-FROM node:22-slim AS builder
+FROM node:22.13-slim AS builder
 
 ENV NODE_ENV=development \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
@@ -48,7 +48,7 @@ RUN npm run build \
 #   - no compilers, no package manager work, no shell access for the app
 #   - dedicated non-root user owns /app and the writable subtrees
 # ──────────────────────────────────────────────────────────────────────
-FROM node:22-slim AS runtime
+FROM node:22.13-slim AS runtime
 
 ENV NODE_ENV=production \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
