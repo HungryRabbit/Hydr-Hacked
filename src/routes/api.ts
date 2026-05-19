@@ -197,10 +197,15 @@ router.post('/get-link', apiLimiter, authMiddleware, async (req, res) => {
         console.log(`🎉 Lien final: ${finalLink}`);
 
         if (useJD) {
-            await sendToJDownloader(finalLink, currentTitleName || 'Unknown', isSeries);
-            res.json({ status: 'succès', message: 'Lien envoyé à JDownloader !', link: finalLink });
+            const jdSent = await sendToJDownloader(finalLink, currentTitleName || 'Unknown', isSeries);
+            res.json({
+                status: 'succès',
+                message: jdSent ? 'Lien envoyé à JDownloader !' : 'JDownloader non configuré — lien direct affiché.',
+                link: finalLink,
+                jdSent
+            });
         } else {
-            res.json({ status: 'succès', message: 'Lien récupéré !', link: finalLink });
+            res.json({ status: 'succès', message: 'Lien récupéré !', link: finalLink, jdSent: false });
         }
     } catch (error: any) {
         console.error("Erreur /get-link:", error.message);
@@ -208,56 +213,46 @@ router.post('/get-link', apiLimiter, authMiddleware, async (req, res) => {
     }
 });
 
-// ========================= GET LINKS BATCH =========================
+// ========================= BULK GET LINKS =========================
 
-router.post('/get-links-batch', apiLimiter, authMiddleware, async (req, res) => {
-    const { chosenIds, useJD } = req.body;
-    if (!chosenIds || !Array.isArray(chosenIds)) return res.status(400).json({ error: "Tableau d'IDs manquant." });
-    
+router.post('/get-links', apiLimiter, authMiddleware, async (req, res) => {
+    const { chosenIds, useJD: useJDRaw } = req.body;
+    if (!Array.isArray(chosenIds) || chosenIds.length === 0) {
+        return res.status(400).json({ error: "chosenIds doit être un tableau non vide." });
+    }
+    if (chosenIds.length > 50) {
+        return res.status(400).json({ error: "Limite: 50 liens par requête." });
+    }
+    const useJD = useJDRaw !== false;
     const { currentTitleName, isSeries, directUrlMap, currentSelectionSource } = globalState;
     const activeSource = currentSelectionSource ? sourceRegistry.get(currentSelectionSource) : null;
 
-    console.log(`\n--- Get Links Batch [${activeSource?.name.toUpperCase()}]: ${chosenIds.length} liens pour "${currentTitleName}" (JD: ${useJD !== false}) ---`);
+    console.log(`\n--- Get Links [${activeSource?.name.toUpperCase()}]: ${chosenIds.length} IDs pour "${currentTitleName}" (JD: ${useJD}) ---`);
 
-    try {
-        const results: string[] = [];
-        const errors: string[] = [];
-
-        for (const chosenId of chosenIds) {
-            try {
-                let finalLink: string | null = null;
-                if (directUrlMap[String(chosenId)]) {
-                    finalLink = directUrlMap[String(chosenId)];
-                } else if (activeSource?.resolveLink) {
-                    finalLink = await activeSource.resolveLink(String(chosenId));
-                }
-
-                if (finalLink) {
-                    results.push(finalLink);
-                    if (useJD !== false) {
-                        await sendToJDownloader(finalLink, currentTitleName || 'Unknown', isSeries);
-                    }
-                } else {
-                    errors.push(`ID ${chosenId} introuvable.`);
-                }
-            } catch (err: any) {
-                errors.push(`Erreur pour ID ${chosenId}: ${err.message}`);
+    const results: Array<{ chosenId: string; link?: string; jdSent?: boolean; error?: string }> = [];
+    for (const rawId of chosenIds) {
+        const id = String(rawId);
+        try {
+            let link: string | null = null;
+            if (directUrlMap[id]) {
+                link = directUrlMap[id];
+            } else if (activeSource?.resolveLink) {
+                link = await activeSource.resolveLink(id);
             }
+            if (!link) {
+                results.push({ chosenId: id, error: "Impossible de résoudre le lien." });
+                continue;
+            }
+            let jdSent = false;
+            if (useJD) {
+                jdSent = await sendToJDownloader(link, currentTitleName || 'Unknown', isSeries);
+            }
+            results.push({ chosenId: id, link, jdSent });
+        } catch (e: any) {
+            results.push({ chosenId: id, error: e.message || String(e) });
         }
-
-        if (results.length === 0) {
-            return res.status(500).json({ error: "Aucun lien n'a pu être résolu.", details: errors });
-        }
-
-        if (useJD !== false) {
-            res.json({ status: 'succès', message: `${results.length} lien(s) envoyé(s) à JDownloader !`, errors: errors.length > 0 ? errors : undefined });
-        } else {
-            res.json({ status: 'succès', message: `${results.length} lien(s) récupéré(s) !`, links: results, errors: errors.length > 0 ? errors : undefined });
-        }
-    } catch (error: any) {
-        console.error("Erreur /get-links-batch:", error.message);
-        res.status(500).json({ error: `Erreur serveur: ${error.message}` });
     }
+    res.json({ results });
 });
 
 // ========================= MOVIEX DECODE =========================

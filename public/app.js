@@ -573,19 +573,72 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // --- MODAL ---
+    // --- SELECTION PAGE (replaces the old modal flow) ---
+    const selectionState = {
+        items: new Map(),
+        previousSectionId: 'section-search'
+    };
+
+    const showSelectionPage = () => {
+        const active = document.querySelector('.section:not(.hidden)');
+        if (active && active.id !== 'section-selection') {
+            selectionState.previousSectionId = active.id;
+        }
+        document.querySelectorAll('.section').forEach(s => hide(s));
+        show(dom('section-selection'));
+        document.querySelectorAll('.nav-links li').forEach(l => l.classList.remove('active'));
+    };
+
+    const resetSelection = () => {
+        selectionState.items.clear();
+        updateSelectionActionBar();
+    };
+
+    const updateSelectionActionBar = () => {
+        const bar = dom('selection-action-bar');
+        const count = selectionState.items.size;
+        const label = dom('selection-action-count');
+        if (label) label.textContent = `${count} sélectionné${count > 1 ? 's' : ''}`;
+        if (count > 0) show(bar); else hide(bar);
+    };
+
+    const renderLoader = (parent) => {
+        parent.replaceChildren();
+        const wrap = document.createElement('div');
+        wrap.className = 'loader-wrapper';
+        const sp = document.createElement('div');
+        sp.className = 'loader';
+        wrap.appendChild(sp);
+        parent.appendChild(wrap);
+    };
+
     const handleSelection = async (movie) => {
-        showModal(movie.title, '<div class="loader-wrapper"><div class="loader"></div></div>');
+        showSelectionPage();
+        dom('selection-title').textContent = movie.title;
+        const body = dom('selection-body');
+        renderLoader(body);
+        dom('selection-results').classList.add('hidden');
+        dom('selection-results').replaceChildren();
+        resetSelection();
         try {
             let ep = '/select-movie';
             if (movie.source === 'hydracker' && movie.hrefPath && movie.hrefPath.includes('download')) {
                 ep = '/select-trending';
             }
             const data = await apiCall(ep, 'POST', { hrefPath: movie.hrefPath || '', title: movie.title, type: movie.type, source: movie.source });
-            // Ajout du 3ème argument : movie.source
-            renderModalOptions(data, movie.title, movie.source);
+            renderModalOptions(data, movie.title, movie.source, {
+                container: body,
+                multiSelect: true,
+                onSelectionChange: updateSelectionActionBar
+            });
+            if (window.lucide) window.lucide.createIcons();
         } catch (e) {
-            dom('modal-body').innerHTML = `<p style="color:red">${e.message}</p>`;
+            body.replaceChildren();
+            const err = document.createElement('p');
+            err.style.color = 'red';
+            err.style.padding = '1rem';
+            err.textContent = e.message;
+            body.appendChild(err);
         }
     };
 
@@ -608,20 +661,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return 3;
     };
 
-    const renderModalOptions = (data, currentTitle = '', source = '') => {
-        const body = dom('modal-body');
+    const renderModalOptions = (data, currentTitle = '', source = '', opts = {}) => {
+        const body = opts.container || dom('modal-body');
+        const multiSelect = opts.multiSelect === true;
+        const onSelectionChange = typeof opts.onSelectionChange === 'function' ? opts.onSelectionChange : null;
+        if (multiSelect && selectionState && selectionState.items) {
+            selectionState.items.clear();
+            if (onSelectionChange) onSelectionChange();
+        }
         body.innerHTML = '';
-
-        const selectedIds = new Set();
-        const updateBatchUI = () => {
-            const count = selectedIds.size;
-            const container = document.getElementById('batch-download-container');
-            if (container) {
-                container.style.display = count > 0 ? 'block' : 'none';
-                const countSpan = document.getElementById('batch-count');
-                if (countSpan) countSpan.textContent = count;
-            }
-        };
 
         // --- 0. TYPE DETECTION ---
         const hasSaisonLabel = data.seasons && data.seasons.some(s => s.label.toLowerCase().includes('saison'));
@@ -642,40 +690,90 @@ document.addEventListener('DOMContentLoaded', () => {
             h4.className = "modal-subtitle";
             body.appendChild(h4);
 
-            const seasonsWrapper = document.createElement('div');
-            seasonsWrapper.className = 'seasons-wrapper';
+            const groupedSeasons = new Map();
             
+            // Flatten and collect all season options
             data.seasons.forEach(s => {
-                const btn = document.createElement('button');
-                btn.className = 'version-tab'; // using version-tab for a clean look
-                btn.innerHTML = `<span>${s.label}</span>`;
-                btn.title = s.label;
+                let labelsToProcess = [];
+                // Handle cases where ZT might combine multiple seasons in one label
+                if ((s.label.match(/Saison/ig) || []).length > 1) {
+                    labelsToProcess = s.label.split(/(?=Saison\s*\d+)/i).filter(Boolean);
+                } else {
+                    labelsToProcess = [s.label];
+                }
 
-                btn.onclick = async () => {
-                    body.innerHTML = '<div class="loader-wrapper"><div class="loader"></div></div>';
-                    try {
-                        const res = await apiCall('/select-season', 'POST', { seasonValue: s.value });
-                        res.seasons = data.seasons;
-                        
-                        const baseTitle = currentTitle.split(' - ')[0];
-                        const newTitle = (s.label.toLowerCase().includes('saison') || s.label.toLowerCase().includes('intégrale')) 
-                            ? `${baseTitle} - ${s.label}` 
-                            : currentTitle;
-                        
-                        const titleEl = dom('modal-title');
-                        if (titleEl) titleEl.textContent = newTitle;
-                        console.log(`[Modal] Titre mis à jour : ${newTitle}`);
+                labelsToProcess.forEach(label => {
+                    const cleanLabel = label.trim();
+                    // Detect season group: "Saison 1 HDTV (FRENCH)" -> group "Saison 1", sublabel "HDTV (FRENCH)"
+                    const seasonMatch = cleanLabel.match(/^(Saison\s*\d+)(.*)$/i);
+                    let groupName = "Versions";
+                    let subLabel = cleanLabel;
 
-                        renderModalOptions(res, newTitle, source);
-                    } catch (e) {
-                        body.innerHTML = `<p style="color:red; padding:1rem;">Erreur: ${e.message}</p>`;
+                    if (seasonMatch) {
+                        groupName = seasonMatch[1].trim();
+                        subLabel = seasonMatch[2].trim() || "Standard";
+                    } else if (cleanLabel.toLowerCase().includes('intégrale')) {
+                        groupName = "Intégrales";
+                    } else if (cleanLabel.toLowerCase().includes('saison')) {
+                        // Cas particulier comme "Saisons 1 à 5"
+                        groupName = cleanLabel;
+                        subLabel = "Pack";
                     }
-                };
 
-                seasonsWrapper.appendChild(btn);
+
+                    if (!groupedSeasons.has(groupName)) groupedSeasons.set(groupName, []);
+                    groupedSeasons.get(groupName).push({ label: subLabel, fullLabel: cleanLabel, value: s.value });
+                });
             });
-            body.appendChild(seasonsWrapper);
-            
+
+            // Render grouped seasons
+            groupedSeasons.forEach((options, groupName) => {
+                const groupDiv = document.createElement('div');
+                groupDiv.className = "season-group";
+
+                const titleDiv = document.createElement('div');
+                titleDiv.className = "season-group-title";
+                titleDiv.textContent = groupName;
+                groupDiv.appendChild(titleDiv);
+
+                const grid = document.createElement('div');
+                grid.className = "seasons-grid";
+
+                options.forEach(opt => {
+                    const btn = document.createElement('button');
+                    btn.className = 'quality-pill';
+                    btn.innerHTML = `<span>${opt.label}</span>`;
+                    btn.title = opt.fullLabel;
+
+                    btn.onclick = async () => {
+                        body.innerHTML = '<div class="loader-wrapper"><div class="loader"></div></div>';
+                        try {
+                            const res = await apiCall('/select-season', 'POST', { seasonValue: opt.value });
+                            res.seasons = data.seasons;
+                            
+                            const baseTitle = currentTitle.split(' - ')[0];
+                            const newTitle = (groupName.startsWith('Saison') || groupName.startsWith('Intégrale')) 
+                                ? `${baseTitle} - ${groupName}` 
+                                : currentTitle;
+                            
+                            const titleEl = dom('modal-title');
+                            if (titleEl) titleEl.textContent = newTitle;
+                            console.log(`[Modal] Titre mis à jour : ${newTitle}`);
+
+                            renderModalOptions(res, newTitle, source, opts);
+                            if (window.lucide) window.lucide.createIcons();
+                        } catch (e) {
+                            body.innerHTML = `<p style="color:red; padding:1rem;">Erreur: ${e.message}</p>`;
+                        }
+                    };
+
+                    grid.appendChild(btn);
+                });
+
+                groupDiv.appendChild(grid);
+                body.appendChild(groupDiv);
+            });
+
             const sep = document.createElement('hr');
             sep.className = 'modal-sep';
             body.appendChild(sep);
@@ -705,11 +803,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return true;
         }).sort((a, b) => {
             if (a.isFullSeason !== b.isFullSeason) return b.isFullSeason - a.isFullSeason;
-            if (isActuallySeries) {
-                const epA = parseInt(String(a.episode || '').replace(/\D/g, '')) || 0;
-                const epB = parseInt(String(b.episode || '').replace(/\D/g, '')) || 0;
-                if (epA !== epB) return epA - epB;
-            }
             if (a.rank !== b.rank) return a.rank - b.rank;
             return a.sizeVal - b.sizeVal;
         });
@@ -753,7 +846,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Group by host
             const hostGroups = new Map();
             toShow.forEach(q => {
-                let hostKey = q.host || 'inconnu';
+                const hostKey = q.host || 'inconnu';
                 if (!hostGroups.has(hostKey)) hostGroups.set(hostKey, []);
                 hostGroups.get(hostKey).push(q);
             });
@@ -773,15 +866,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 hostHeader.textContent = hostDisplay;
                 filesContainer.appendChild(hostHeader);
 
-                // Sort items by episode number
-                items.sort((a, b) => {
-                    if (a.isFullSeason && !b.isFullSeason) return -1;
-                    if (!a.isFullSeason && b.isFullSeason) return 1;
-                    
-                    const numA = a.episode ? parseFloat(a.episode.toString().replace(/[^0-9.]/g, '')) || 0 : 0;
-                    const numB = b.episode ? parseFloat(b.episode.toString().replace(/[^0-9.]/g, '')) || 0 : 0;
-                    return numA - numB;
-                });
                 
                 const itemsGrid = document.createElement('div');
                 itemsGrid.className = isActuallySeries ? "seasons-grid" : "files-list";
@@ -809,8 +893,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         row.style.justifyContent = 'space-between';
                         row.style.alignItems = 'center';
                         row.style.padding = "8px 14px";
-                        row.style.cursor = "pointer";
-                        row.style.gap = "20px"; // Added gap to space out the content from the buttons
+                        row.style.cursor = "default";
                         
                         let buttonsHtml = '';
                         if (isHydracker) {
@@ -832,12 +915,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             `;
                         }
 
-                        const isChecked = selectedIds.has(q.id);
                         row.innerHTML = `
                             <div style="display: flex; align-items: center;">
-                                <div class="batch-checkbox" data-id="${q.id}" style="cursor: pointer; display: flex; align-items: center; color: ${isChecked ? 'var(--primary)' : 'var(--text-sec)'}; margin-right: 8px;">
-                                    <i data-lucide="${isChecked ? 'check-square' : 'square'}" style="width: 18px; height: 18px;"></i>
-                                </div>
                                 ${rankIcon ? `<span style="margin-right:5px">${rankIcon}</span>` : ''}
                                 <span>${episodeLabel}</span>
                             </div>
@@ -845,7 +924,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         `;
                     } else {
                         row.className = `file-btn ${specialClass}`;
-                        row.style.cursor = "pointer";
+                        row.style.cursor = "default";
                         row.style.display = 'flex';
                         row.style.justifyContent = 'space-between';
                         row.style.alignItems = 'center';
@@ -874,13 +953,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             `;
                         }
 
-                        const isChecked = selectedIds.has(q.id);
                         row.innerHTML = `
                             <div class="file-btn-left">
                                 <div class="file-host">
-                                    <div class="batch-checkbox" data-id="${q.id}" style="cursor: pointer; display: flex; align-items: center; color: ${isChecked ? 'var(--primary)' : 'var(--text-sec)'}; margin-right: 8px;">
-                                        <i data-lucide="${isChecked ? 'check-square' : 'square'}" style="width: 18px; height: 18px;"></i>
-                                    </div>
                                     ${rankIcon ? `<span class="rank-icon">${rankIcon}</span>` : ''}
                                     <span class="host-name">${hostDisplay}</span>
                                     ${mirrorLabel}
@@ -890,24 +965,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                             ${buttonsHtml}
                         `;
-                    }
-
-                    const chk = row.querySelector('.batch-checkbox');
-                    if (chk) {
-                        chk.onclick = (e) => {
-                            e.stopPropagation();
-                            if (selectedIds.has(q.id)) {
-                                selectedIds.delete(q.id);
-                                chk.innerHTML = '<i data-lucide="square" style="width: 18px; height: 18px;"></i>';
-                                chk.style.color = 'var(--text-sec)';
-                            } else {
-                                selectedIds.add(q.id);
-                                chk.innerHTML = '<i data-lucide="check-square" style="width: 18px; height: 18px;"></i>';
-                                chk.style.color = 'var(--primary)';
-                            }
-                            lucide.createIcons({ root: chk });
-                            updateBatchUI();
-                        };
                     }
 
                     // On attache l'event listener Movix UNIQUEMENT si on est sur Hydracker
@@ -941,7 +998,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     // L'event listener classique fonctionne pour toutes les sources
-                    row.onclick = async (e) => {
+                    row.querySelector('.btn-dl').onclick = async (e) => {
                         e.stopPropagation();
                         hide(dom('modal-overlay'));
                         toggleBlockingLoader(true, "Récupération du lien...");
@@ -950,7 +1007,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             const result = await apiCall('/get-link', 'POST', { chosenId: q.id, useJD });
                             toggleBlockingLoader(false);
 
-                            if (useJD) {
+                            // Only follow the JD path if the server confirmed the .crawljob
+                            // was actually written. Otherwise fall through and show the
+                            // direct link so the user can copy/open it manually.
+                            if (useJD && result.jdSent) {
                                 showToast('Lien envoyé à JDownloader !');
                                 document.querySelector('.nav-links li[data-target="section-downloads"]').click();
                             } else {
@@ -977,7 +1037,50 @@ document.addEventListener('DOMContentLoaded', () => {
                         b.addEventListener('mouseout', () => b.style.transform = 'scale(1)');
                     });
 
-                    itemsGrid.appendChild(row);
+                    if (multiSelect) {
+                        const wrap = document.createElement('div');
+                        wrap.className = 'file-row-select';
+                        const cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.dataset.id = q.id != null ? String(q.id) : '';
+                        const initiallyChecked = selectionState.items.has(cb.dataset.id);
+                        cb.checked = initiallyChecked;
+                        if (initiallyChecked) wrap.classList.add('is-selected');
+                        const main = document.createElement('div');
+                        main.className = 'row-main';
+                        main.appendChild(row);
+                        wrap.appendChild(cb);
+                        wrap.appendChild(main);
+
+                        const setSelected = (on) => {
+                            if (!cb.dataset.id) return;
+                            cb.checked = on;
+                            wrap.classList.toggle('is-selected', on);
+                            if (on) {
+                                selectionState.items.set(cb.dataset.id, {
+                                    id: cb.dataset.id,
+                                    host: q.host || '',
+                                    quality: q.quality || '',
+                                    episode: q.episode || '',
+                                    isFullSeason: !!q.isFullSeason
+                                });
+                            } else {
+                                selectionState.items.delete(cb.dataset.id);
+                            }
+                            if (onSelectionChange) onSelectionChange();
+                        };
+
+                        cb.addEventListener('change', () => setSelected(cb.checked));
+                        wrap.addEventListener('click', (e) => {
+                            if (e.target.closest('button')) return;
+                            if (e.target === cb) return;
+                            setSelected(!cb.checked);
+                        });
+
+                        itemsGrid.appendChild(wrap);
+                    } else {
+                        itemsGrid.appendChild(row);
+                    }
                 });
             });
 
@@ -1002,50 +1105,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         renderFiles(activeVersion);
-
-        const batchDownloadContainer = document.createElement('div');
-        batchDownloadContainer.id = 'batch-download-container';
-        batchDownloadContainer.style = 'display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 1rem;';
-        batchDownloadContainer.innerHTML = `
-            <button class="btn-primary" id="btn-batch-download" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 8px;">
-                <i data-lucide="download"></i> Télécharger la sélection (<span id="batch-count">0</span>)
-            </button>
-        `;
-        body.appendChild(batchDownloadContainer);
-
-        const btnBatch = batchDownloadContainer.querySelector('#btn-batch-download');
-        btnBatch.onclick = async () => {
-            if (selectedIds.size === 0) return;
-            hide(dom('modal-overlay'));
-            toggleBlockingLoader(true, "Récupération des liens...");
-            try {
-                const useJD = document.getElementById('toggle-jd') ? document.getElementById('toggle-jd').checked : true;
-                const result = await apiCall('/get-links-batch', 'POST', { chosenIds: Array.from(selectedIds), useJD });
-                toggleBlockingLoader(false);
-
-                if (useJD) {
-                    showToast(result.message || 'Liens envoyés à JDownloader !');
-                    document.querySelector('.nav-links li[data-target="section-downloads"]').click();
-                } else {
-                    showModal('Liens Directs', `
-                        <div class="direct-link-box">
-                            <p style="margin-bottom: 10px;">Voici vos liens de téléchargement :</p>
-                            <textarea readonly id="direct-links-input" style="width: 100%; height: 150px; background: var(--bg-main); border: 1px solid var(--border); color: white; border-radius: var(--radius); margin-bottom: 15px; padding: 12px; font-family: monospace; white-space: pre;">${(result.links || []).join('\n')}</textarea>
-                            <div class="btn-group" style="display: flex; gap: 10px;">
-                                <button class="btn-primary" style="flex: 1;" onclick="document.getElementById('direct-links-input').select(); document.execCommand('copy'); showToast('Copiés !')">Tout Copier</button>
-                            </div>
-                        </div>
-                    `);
-                }
-            } catch (err) {
-                toggleBlockingLoader(false);
-                showToast("Erreur: " + err.message);
-                show(dom('modal-overlay'));
-            }
-        };
-        
-        updateBatchUI();
-        lucide.createIcons({ root: batchDownloadContainer });
     };
 
 
@@ -1063,6 +1122,165 @@ document.addEventListener('DOMContentLoaded', () => {
         await apiCall('/logout', 'POST');
         location.reload();
     };
+
+    // --- Selection page: back button, clear, get all links ---
+    const backBtn = dom('btn-selection-back');
+    if (backBtn) {
+        backBtn.onclick = () => {
+            const target = selectionState.previousSectionId || 'section-search';
+            document.querySelectorAll('.section').forEach(s => hide(s));
+            show(dom(target));
+            document.querySelectorAll('.nav-links li').forEach(l => l.classList.remove('active'));
+            const navLi = document.querySelector(`.nav-links li[data-target="${target}"]`);
+            if (navLi) navLi.classList.add('active');
+            resetSelection();
+            dom('selection-results').classList.add('hidden');
+            dom('selection-results').replaceChildren();
+        };
+    }
+
+    const clearBtn = dom('btn-selection-clear');
+    if (clearBtn) {
+        clearBtn.onclick = () => {
+            selectionState.items.clear();
+            document.querySelectorAll('#selection-body input[type="checkbox"]').forEach(c => { c.checked = false; });
+            document.querySelectorAll('#selection-body .file-row-select.is-selected').forEach(r => r.classList.remove('is-selected'));
+            updateSelectionActionBar();
+        };
+    }
+
+    const renderBulkResults = (results) => {
+        const panel = dom('selection-results');
+        panel.replaceChildren();
+        panel.classList.remove('hidden');
+
+        const successful = results.filter(r => !r.error);
+        const allLinks = successful.map(r => r.link).join('\n');
+
+        const title = document.createElement('h3');
+        const okCount = successful.length;
+        const errCount = results.length - okCount;
+        title.textContent = errCount > 0
+            ? `Liens récupérés (${okCount}/${results.length}, ${errCount} échec${errCount > 1 ? 's' : ''})`
+            : `Liens récupérés (${okCount})`;
+        panel.appendChild(title);
+
+        const toolbar = document.createElement('div');
+        toolbar.className = 'results-toolbar';
+
+        const copyAll = document.createElement('button');
+        copyAll.className = 'btn-copy-all';
+        copyAll.textContent = `Copier tous (${okCount})`;
+        copyAll.disabled = okCount === 0;
+        copyAll.onclick = async () => {
+            try {
+                await navigator.clipboard.writeText(allLinks);
+                showToast(`${okCount} lien${okCount > 1 ? 's' : ''} copié${okCount > 1 ? 's' : ''} !`);
+            } catch {
+                showToast('Copie impossible — sélectionnez et copiez manuellement.');
+            }
+        };
+        toolbar.appendChild(copyAll);
+
+        const openAll = document.createElement('button');
+        openAll.className = 'btn-open-all';
+        const openLimit = Math.min(okCount, 10);
+        openAll.textContent = `Ouvrir ${openLimit > 0 ? openLimit : ''}${okCount > 10 ? ' (max 10)' : ''}`;
+        openAll.disabled = okCount === 0;
+        openAll.onclick = () => {
+            successful.slice(0, 10).forEach(r => window.open(r.link, '_blank', 'noopener'));
+            if (okCount > 10) showToast(`Limité à 10 onglets sur ${okCount}.`);
+        };
+        toolbar.appendChild(openAll);
+        panel.appendChild(toolbar);
+
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        thead.innerHTML = '<tr><th>#</th><th>Élément</th><th>Lien</th><th></th></tr>';
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+
+        results.forEach((r, i) => {
+            const meta = selectionState.items.get(r.chosenId);
+            const tr = document.createElement('tr');
+            const tdN = document.createElement('td'); tdN.textContent = String(i + 1); tr.appendChild(tdN);
+
+            const tdLabel = document.createElement('td');
+            const labelParts = [];
+            if (meta) {
+                if (meta.episode) labelParts.push(meta.episode);
+                if (meta.quality) labelParts.push(meta.quality);
+                if (meta.host) labelParts.push(meta.host);
+            }
+            tdLabel.textContent = labelParts.length ? labelParts.join(' — ') : r.chosenId;
+            if (!r.error && r.jdSent) {
+                const chip = document.createElement('span');
+                chip.className = 'chip';
+                chip.style.marginLeft = '6px';
+                chip.textContent = '→ JD';
+                tdLabel.appendChild(chip);
+            }
+            tr.appendChild(tdLabel);
+
+            const tdLink = document.createElement('td');
+            tdLink.className = 'col-link';
+            if (r.error) {
+                tdLink.classList.add('row-error');
+                tdLink.textContent = r.error;
+                tr.appendChild(tdLink);
+                const tdEmpty = document.createElement('td');
+                tr.appendChild(tdEmpty);
+            } else {
+                const a = document.createElement('a');
+                a.href = r.link;
+                a.target = '_blank';
+                a.rel = 'noopener';
+                a.textContent = r.link;
+                tdLink.appendChild(a);
+                tr.appendChild(tdLink);
+                const tdCopy = document.createElement('td');
+                const btn = document.createElement('button');
+                btn.className = 'btn-copy-row';
+                btn.textContent = 'Copier';
+                btn.onclick = async () => {
+                    try {
+                        await navigator.clipboard.writeText(r.link);
+                        showToast('Copié !');
+                    } catch {
+                        showToast('Copie impossible');
+                    }
+                };
+                tdCopy.appendChild(btn);
+                tr.appendChild(tdCopy);
+            }
+            tbody.appendChild(tr);
+        });
+
+        table.appendChild(tbody);
+        panel.appendChild(table);
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    const getAllBtn = dom('btn-selection-get-all');
+    if (getAllBtn) {
+        getAllBtn.onclick = async () => {
+            const ids = Array.from(selectionState.items.keys()).filter(Boolean);
+            if (ids.length === 0) {
+                showToast('Aucun élément sélectionné.');
+                return;
+            }
+            const useJD = document.getElementById('toggle-jd') ? document.getElementById('toggle-jd').checked : false;
+            toggleBlockingLoader(true, `Récupération de ${ids.length} lien${ids.length > 1 ? 's' : ''}...`);
+            try {
+                const res = await apiCall('/get-links', 'POST', { chosenIds: ids, useJD });
+                toggleBlockingLoader(false);
+                renderBulkResults(res.results || []);
+            } catch (e) {
+                toggleBlockingLoader(false);
+                showToast('Erreur: ' + e.message);
+            }
+        };
+    }
 
     // Start
     checkSession();
