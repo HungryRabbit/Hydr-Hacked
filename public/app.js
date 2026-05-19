@@ -158,6 +158,8 @@ document.addEventListener('DOMContentLoaded', () => {
             updateLocalDbFiltersVisibility();
         } catch(e) { console.error('Erreur détection source:', e); }
 
+        const trendingHidden = updateTrendingVisibility();
+
         // --- JDownloader Toggle ---
         // Priority: user's localStorage choice > server JD_ENABLED default > off.
         const toggleJd = document.getElementById('toggle-jd');
@@ -171,7 +173,7 @@ document.addEventListener('DOMContentLoaded', () => {
             toggleJd.addEventListener('change', (e) => localStorage.setItem('useJD', e.target.checked));
         }
 
-        loadTrending();
+        if (!trendingHidden) loadTrending();
         lucide.createIcons();
         document.querySelectorAll('input[name="trending-type"]').forEach(radio => {
             radio.addEventListener('change', renderTrending);
@@ -190,7 +192,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (searchInput) searchInput.disabled = s.isOffline;
                 if (searchBtn) searchBtn.disabled = s.isOffline;
 
-                if (!s.isOffline && (wasOffline || (!state.trendingData.films.length && !state.trendingData.series.length))) {
+                const trendingHidden = updateTrendingVisibility();
+                if (!trendingHidden && !s.isOffline && (wasOffline || (!state.trendingData.films.length && !state.trendingData.series.length))) {
                     console.log('[Heartbeat] Site source en ligne, rechargement des tendances...');
                     loadTrending();
                 }
@@ -247,6 +250,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- UI UPDATES ---
+    // LocalDB is the only source that has no trending support (getTrending
+    // returns []), so when it's the only active source the Tendances tab
+    // is dead weight. Hide the nav item + section, and if trending was
+    // the active section, swap to Recherche. Returns true when trending
+    // is hidden, so callers can skip loadTrending().
+    function updateTrendingVisibility() {
+        const onlyLocaldb = state.activeSources.length === 1 && state.activeSources[0] === 'localdb';
+        const trendingNav = document.querySelector('.nav-links li[data-target="section-trending"]');
+        const trendingSection = dom('section-trending');
+        const searchNav = document.querySelector('.nav-links li[data-target="section-search"]');
+        const searchSection = dom('section-search');
+        if (!trendingNav || !trendingSection || !searchNav || !searchSection) return onlyLocaldb;
+
+        if (onlyLocaldb) {
+            trendingNav.classList.add('hidden');
+            if (!trendingSection.classList.contains('hidden')) {
+                hide(trendingSection);
+                show(searchSection);
+                trendingNav.classList.remove('active');
+                searchNav.classList.add('active');
+            }
+        } else {
+            trendingNav.classList.remove('hidden');
+        }
+        return onlyLocaldb;
+    }
+
     function updateLocalDbFiltersVisibility() {
         const hasLocalDb = state.activeSources.includes('localdb');
         document.querySelectorAll('.localdb-filter').forEach(el => {
@@ -270,8 +300,9 @@ document.addEventListener('DOMContentLoaded', () => {
             state.activeSources = res.activeSources;
             renderSourcesUI();
             updateLocalDbFiltersVisibility();
+            const trendingHidden = updateTrendingVisibility();
             showToast('Sources mises à jour');
-            loadTrending();
+            if (!trendingHidden) loadTrending();
         } catch(e) {
             showToast('Erreur sources: ' + e.message);
             renderSourcesUI(); // Revert UI
