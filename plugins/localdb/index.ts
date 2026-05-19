@@ -8,6 +8,10 @@ import { DatabaseSync } from 'node:sqlite';
 type IndexedTitle = {
     norm: string;
     normOrig: string;
+    // Distinct token list for the entry (union of norm + normOrig words).
+    // Precomputed at index build time so the search hot path never
+    // re-splits/dedupes these strings.
+    words: string[];
     title_name: string;
     original_title: string | null;
     tmdb_id: number;
@@ -21,6 +25,13 @@ export class LocalDatabaseAPI implements ISource {
     private db: any = null;
     private dbPath: string;
     private titleIndex: IndexedTitle[] | null = null;
+    // Inverted indexes used by search() to shrink the candidate set from
+    // ~104K rows down to <2K before running tier scoring. Populated by
+    // buildTitleIndex(); never read or written outside of that method
+    // and search().
+    private tokenIndex: Map<string, number[]> | null = null;     // exact token  -> row indices
+    private titleByNorm: Map<string, number[]> | null = null;    // full norm    -> row indices (Tier 1)
+    private prefixIndex: Map<string, number[]> | null = null;    // 2-char prefix-> row indices (Tier 2 + fuzzy)
 
     constructor() {
         this.dbPath = path.resolve(CONFIG.DB_PATH || './database/darkiworld.db');
@@ -53,7 +64,18 @@ export class LocalDatabaseAPI implements ISource {
     }
 
     async healthCheck(): Promise<boolean> {
-        return this.initDb();
+        const ok = this.initDb();
+        if (ok) {
+            // Warm the search indexes right after registration so the
+            // first /search request doesn't eat the multi-second build
+            // cost. setImmediate yields the current tick — the parallel
+            // health checks of other plugins still run first.
+            setImmediate(() => {
+                try { this.buildTitleIndex(); }
+                catch (e: any) { console.error('[LocalDB] Index warmup failed:', e.message); }
+            });
+        }
+        return ok;
     }
 
     // Lowercase, strip diacritics, strip apostrophes, collapse to alnum tokens.
@@ -105,7 +127,13 @@ export class LocalDatabaseAPI implements ISource {
 
     private buildTitleIndex(): void {
         if (this.titleIndex !== null) return;
-        if (!this.initDb()) { this.titleIndex = []; return; }
+        if (!this.initDb()) {
+            this.titleIndex = [];
+            this.tokenIndex = new Map();
+            this.titleByNorm = new Map();
+            this.prefixIndex = new Map();
+            return;
+        }
 
         const t0 = Date.now();
         const sql = `
@@ -120,18 +148,53 @@ export class LocalDatabaseAPI implements ISource {
         `;
         const rows = this.db.prepare(sql).all() as any[];
 
-        this.titleIndex = rows.map((r: any) => ({
-            norm: LocalDatabaseAPI.normalize(r.title_name),
-            normOrig: LocalDatabaseAPI.normalize(r.original_title),
-            title_name: r.title_name,
-            original_title: r.original_title,
-            tmdb_id: r.tmdb_id || 0,
-            category_name: r.category_name,
-            title_poster: r.title_poster,
-            created_at: r.created_at,
-        }));
+        const titleIndex = new Array<IndexedTitle>(rows.length);
+        const tokenIndex = new Map<string, number[]>();
+        const titleByNorm = new Map<string, number[]>();
+        const prefixIndex = new Map<string, number[]>();
 
-        console.log(`[LocalDB] Index construit: ${this.titleIndex.length} titres en ${Date.now() - t0}ms`);
+        const push = (m: Map<string, number[]>, key: string, idx: number) => {
+            const list = m.get(key);
+            if (list) list.push(idx);
+            else m.set(key, [idx]);
+        };
+
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            const norm = LocalDatabaseAPI.normalize(r.title_name);
+            const normOrig = LocalDatabaseAPI.normalize(r.original_title);
+
+            // Deduplicated union of words from both title fields.
+            const seen = new Set<string>();
+            const words: string[] = [];
+            if (norm) for (const w of norm.split(' ')) if (w && !seen.has(w)) { seen.add(w); words.push(w); }
+            if (normOrig) for (const w of normOrig.split(' ')) if (w && !seen.has(w)) { seen.add(w); words.push(w); }
+
+            titleIndex[i] = {
+                norm, normOrig, words,
+                title_name: r.title_name,
+                original_title: r.original_title,
+                tmdb_id: r.tmdb_id || 0,
+                category_name: r.category_name,
+                title_poster: r.title_poster,
+                created_at: r.created_at,
+            };
+
+            if (norm) push(titleByNorm, norm, i);
+            if (normOrig && normOrig !== norm) push(titleByNorm, normOrig, i);
+            for (const w of words) {
+                push(tokenIndex, w, i);
+                if (w.length >= 2) push(prefixIndex, w.slice(0, 2), i);
+            }
+        }
+
+        this.titleIndex = titleIndex;
+        this.tokenIndex = tokenIndex;
+        this.titleByNorm = titleByNorm;
+        this.prefixIndex = prefixIndex;
+
+        console.log(`[LocalDB] Index construit: ${titleIndex.length} titres en ${Date.now() - t0}ms ` +
+            `(tokens=${tokenIndex.size}, prefixes=${prefixIndex.size})`);
     }
 
     private mapCategoryToType(category: string): MediaType {
@@ -170,14 +233,33 @@ export class LocalDatabaseAPI implements ISource {
         this.buildTitleIndex();
         if (!this.titleIndex || this.titleIndex.length === 0) return [];
 
+        const t0 = Date.now();
         const q = LocalDatabaseAPI.normalize(query);
         if (!q) return [];
         const tokens = q.split(' ').filter(Boolean);
         if (tokens.length === 0) return [];
 
+        // Candidate row indices, gathered from the inverted indexes. For
+        // a typical query this drops the working set from ~104K rows to
+        // a few hundred. Rows that don't show up here cannot match Tier
+        // 1, 2, 3 or 5 — the only thing they could theoretically hit is
+        // Tier 4 substring-inside-a-word, which is rare enough not to
+        // justify a trigram index.
+        const candidates = new Set<number>();
+        const exactHits = this.titleByNorm!.get(q);
+        if (exactHits) for (const i of exactHits) candidates.add(i);
+        for (const tok of tokens) {
+            const rows = this.tokenIndex!.get(tok);
+            if (rows) for (const i of rows) candidates.add(i);
+            if (tok.length >= 2) {
+                const pRows = this.prefixIndex!.get(tok.slice(0, 2));
+                if (pRows) for (const i of pRows) candidates.add(i);
+            }
+        }
+
         const scored: Array<{ idx: number; score: number }> = [];
 
-        for (let i = 0; i < this.titleIndex.length; i++) {
+        for (const i of candidates) {
             const entry = this.titleIndex[i];
             const t = entry.norm;
             const o = entry.normOrig;
@@ -202,10 +284,10 @@ export class LocalDatabaseAPI implements ISource {
                 score = 600;
             }
             // Tier 5: per-token matching, exact-then-fuzzy, any word order.
-            // Words are computed on demand instead of stored, to keep the
-            // index small (104K titles × stored word arrays is too heavy).
+            // Uses the precomputed entry.words instead of re-splitting on
+            // every row.
             else {
-                const words = (entry.norm + ' ' + (entry.normOrig || '')).split(' ').filter(Boolean);
+                const words = entry.words;
                 let exactMatched = 0;
                 let fuzzyMatched = 0;
                 let fuzzyPenalty = 0;
@@ -268,13 +350,14 @@ export class LocalDatabaseAPI implements ISource {
             };
         });
 
-        if (mediaType === 'movie') {
-            return results.filter(r => r.type === 'movie' || r.type === 'anime');
-        } else if (mediaType === 'series') {
-            return results.filter(r => r.type === 'series' || r.type === 'anime');
-        } else {
-            return results.filter(r => r.type === mediaType);
-        }
+        const filtered = (mediaType === 'movie')
+            ? results.filter(r => r.type === 'movie' || r.type === 'anime')
+            : (mediaType === 'series')
+                ? results.filter(r => r.type === 'series' || r.type === 'anime')
+                : results.filter(r => r.type === mediaType);
+
+        console.log(`[LocalDB] search "${query}" → ${candidates.size} candidats, ${filtered.length} résultats en ${Date.now() - t0}ms`);
+        return filtered;
     }
 
     async getTrending(mediaType: MediaType): Promise<SearchResult[]> {
