@@ -631,89 +631,40 @@ document.addEventListener('DOMContentLoaded', () => {
             h4.className = "modal-subtitle";
             body.appendChild(h4);
 
-            const groupedSeasons = new Map();
+            const seasonsWrapper = document.createElement('div');
+            seasonsWrapper.className = 'seasons-wrapper';
             
-            // Flatten and collect all season options
             data.seasons.forEach(s => {
-                let labelsToProcess = [];
-                // Handle cases where ZT might combine multiple seasons in one label
-                if ((s.label.match(/Saison/ig) || []).length > 1) {
-                    labelsToProcess = s.label.split(/(?=Saison\s*\d+)/i).filter(Boolean);
-                } else {
-                    labelsToProcess = [s.label];
-                }
+                const btn = document.createElement('button');
+                btn.className = 'version-tab'; // using version-tab for a clean look
+                btn.innerHTML = `<span>${s.label}</span>`;
+                btn.title = s.label;
 
-                labelsToProcess.forEach(label => {
-                    const cleanLabel = label.trim();
-                    // Detect season group: "Saison 1 HDTV (FRENCH)" -> group "Saison 1", sublabel "HDTV (FRENCH)"
-                    const seasonMatch = cleanLabel.match(/^(Saison\s*\d+)(.*)$/i);
-                    let groupName = "Versions";
-                    let subLabel = cleanLabel;
+                btn.onclick = async () => {
+                    body.innerHTML = '<div class="loader-wrapper"><div class="loader"></div></div>';
+                    try {
+                        const res = await apiCall('/select-season', 'POST', { seasonValue: s.value });
+                        res.seasons = data.seasons;
+                        
+                        const baseTitle = currentTitle.split(' - ')[0];
+                        const newTitle = (s.label.toLowerCase().includes('saison') || s.label.toLowerCase().includes('intégrale')) 
+                            ? `${baseTitle} - ${s.label}` 
+                            : currentTitle;
+                        
+                        const titleEl = dom('modal-title');
+                        if (titleEl) titleEl.textContent = newTitle;
+                        console.log(`[Modal] Titre mis à jour : ${newTitle}`);
 
-                    if (seasonMatch) {
-                        groupName = seasonMatch[1].trim();
-                        subLabel = seasonMatch[2].trim() || "Standard";
-                    } else if (cleanLabel.toLowerCase().includes('intégrale')) {
-                        groupName = "Intégrales";
-                    } else if (cleanLabel.toLowerCase().includes('saison')) {
-                        // Cas particulier comme "Saisons 1 à 5"
-                        groupName = cleanLabel;
-                        subLabel = "Pack";
+                        renderModalOptions(res, newTitle, source);
+                    } catch (e) {
+                        body.innerHTML = `<p style="color:red; padding:1rem;">Erreur: ${e.message}</p>`;
                     }
+                };
 
-
-                    if (!groupedSeasons.has(groupName)) groupedSeasons.set(groupName, []);
-                    groupedSeasons.get(groupName).push({ label: subLabel, fullLabel: cleanLabel, value: s.value });
-                });
+                seasonsWrapper.appendChild(btn);
             });
-
-            // Render grouped seasons
-            groupedSeasons.forEach((options, groupName) => {
-                const groupDiv = document.createElement('div');
-                groupDiv.className = "season-group";
-
-                const titleDiv = document.createElement('div');
-                titleDiv.className = "season-group-title";
-                titleDiv.textContent = groupName;
-                groupDiv.appendChild(titleDiv);
-
-                const grid = document.createElement('div');
-                grid.className = "seasons-grid";
-
-                options.forEach(opt => {
-                    const btn = document.createElement('button');
-                    btn.className = 'quality-pill';
-                    btn.innerHTML = `<span>${opt.label}</span>`;
-                    btn.title = opt.fullLabel;
-
-                    btn.onclick = async () => {
-                        body.innerHTML = '<div class="loader-wrapper"><div class="loader"></div></div>';
-                        try {
-                            const res = await apiCall('/select-season', 'POST', { seasonValue: opt.value });
-                            res.seasons = data.seasons;
-                            
-                            const baseTitle = currentTitle.split(' - ')[0];
-                            const newTitle = (groupName.startsWith('Saison') || groupName.startsWith('Intégrale')) 
-                                ? `${baseTitle} - ${groupName}` 
-                                : currentTitle;
-                            
-                            const titleEl = dom('modal-title');
-                            if (titleEl) titleEl.textContent = newTitle;
-                            console.log(`[Modal] Titre mis à jour : ${newTitle}`);
-
-                            renderModalOptions(res, newTitle, source);
-                        } catch (e) {
-                            body.innerHTML = `<p style="color:red; padding:1rem;">Erreur: ${e.message}</p>`;
-                        }
-                    };
-
-                    grid.appendChild(btn);
-                });
-
-                groupDiv.appendChild(grid);
-                body.appendChild(groupDiv);
-            });
-
+            body.appendChild(seasonsWrapper);
+            
             const sep = document.createElement('hr');
             sep.className = 'modal-sep';
             body.appendChild(sep);
@@ -743,6 +694,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return true;
         }).sort((a, b) => {
             if (a.isFullSeason !== b.isFullSeason) return b.isFullSeason - a.isFullSeason;
+            if (isActuallySeries) {
+                const epA = parseInt(String(a.episode || '').replace(/\D/g, '')) || 0;
+                const epB = parseInt(String(b.episode || '').replace(/\D/g, '')) || 0;
+                if (epA !== epB) return epA - epB;
+            }
             if (a.rank !== b.rank) return a.rank - b.rank;
             return a.sizeVal - b.sizeVal;
         });
@@ -786,7 +742,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // Group by host
             const hostGroups = new Map();
             toShow.forEach(q => {
-                const hostKey = q.host || 'inconnu';
+                let hostKey = q.host || 'inconnu';
+                if (source === 'localdb' && isActuallySeries) {
+                    hostKey = 'Épisodes';
+                }
                 if (!hostGroups.has(hostKey)) hostGroups.set(hostKey, []);
                 hostGroups.get(hostKey).push(q);
             });
@@ -833,7 +792,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         row.style.justifyContent = 'space-between';
                         row.style.alignItems = 'center';
                         row.style.padding = "8px 14px";
-                        row.style.cursor = "default";
+                        row.style.cursor = "pointer";
                         
                         let buttonsHtml = '';
                         if (isHydracker) {
@@ -864,7 +823,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         `;
                     } else {
                         row.className = `file-btn ${specialClass}`;
-                        row.style.cursor = "default";
+                        row.style.cursor = "pointer";
                         row.style.display = 'flex';
                         row.style.justifyContent = 'space-between';
                         row.style.alignItems = 'center';
@@ -938,7 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     // L'event listener classique fonctionne pour toutes les sources
-                    row.querySelector('.btn-dl').onclick = async (e) => {
+                    row.onclick = async (e) => {
                         e.stopPropagation();
                         hide(dom('modal-overlay'));
                         toggleBlockingLoader(true, "Récupération du lien...");
