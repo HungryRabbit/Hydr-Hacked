@@ -601,11 +601,28 @@ document.addEventListener('DOMContentLoaded', () => {
         updateSelectionActionBar();
     };
 
+    const BULK_LINKS_MAX = 50;
+
     const updateSelectionActionBar = () => {
         const bar = dom('selection-action-bar');
         const count = selectionState.items.size;
         const label = dom('selection-action-count');
-        if (label) label.textContent = `${count} sélectionné${count > 1 ? 's' : ''}`;
+        const btn = dom('btn-selection-get-all');
+        const over = count > BULK_LINKS_MAX;
+
+        if (label) {
+            if (over) {
+                label.textContent = `${count} sélectionnés — max ${BULK_LINKS_MAX} par requête`;
+                label.style.color = 'var(--accent-red, #ff5252)';
+            } else {
+                label.textContent = `${count} sélectionné${count > 1 ? 's' : ''}`;
+                label.style.color = '';
+            }
+        }
+        if (btn) {
+            btn.disabled = over;
+            btn.title = over ? `Désélectionnez-en ${count - BULK_LINKS_MAX} pour continuer.` : '';
+        }
         if (count > 0) show(bar); else hide(bar);
     };
 
@@ -1274,6 +1291,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const ids = Array.from(selectionState.items.keys()).filter(Boolean);
             if (ids.length === 0) {
                 showToast('Aucun élément sélectionné.');
+                return;
+            }
+            if (ids.length > BULK_LINKS_MAX) {
+                showToast(`Limite: ${BULK_LINKS_MAX} liens par requête. Désélectionnez-en ${ids.length - BULK_LINKS_MAX}.`);
                 return;
             }
             const useJD = document.getElementById('toggle-jd') ? document.getElementById('toggle-jd').checked : false;
