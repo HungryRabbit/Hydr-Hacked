@@ -87,6 +87,25 @@ Construit l'image à partir du `Dockerfile` du dépôt (build multi-stage, runti
 > [!TIP]
 > Pour mettre à jour : `docker compose pull && docker compose up -d` (Option A) ou `git pull && docker compose up -d --build` (Option B).
 
+#### 🧹 Reset complet
+
+Pour repartir d'un état propre (sessions invalidées, téléchargements et base locale effacés) :
+
+```bash
+# 1. Arrête le conteneur et supprime les volumes nommés éventuels
+docker compose down --volumes
+
+# 2. Vide les bind-mounts (sessions, downloads ; gardez `database/darkiworld.db` si vous voulez conserver la LocalDB)
+rm -rf sessions/* downloads/*
+# rm -f database/darkiworld.db   # ← décommentez pour réinitialiser aussi la LocalDB
+
+# 3. Relance
+docker compose up -d
+```
+
+> [!NOTE]
+> `--volumes` n'efface pas les bind-mounts du projet (`./sessions`, `./downloads`, `./database`, `./images`), seulement les volumes Docker nommés. Le `rm -rf` ci-dessus est ce qui fait réellement le nettoyage.
+
 ---
 
 ### 💻 Installation Manuelle
