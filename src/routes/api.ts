@@ -17,7 +17,8 @@ router.get('/status', (req, res) => {
         isOffline: globalState.isSiteOffline,
         message: globalState.siteOfflineMessage,
         activeSources: globalState.activeSources,
-        availableSources: sourceRegistry.getAvailableNames()
+        availableSources: sourceRegistry.getAvailableNames(),
+        jdDefault: CONFIG.JD_ENABLED
     });
 });
 

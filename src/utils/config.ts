@@ -25,6 +25,7 @@ export const CONFIG = {
 
     // App
     API_PASSWORD: process.env.API_PASSWORD || DEV_API_PASSWORD,
+    JD_ENABLED: (process.env.JD_ENABLED || '').toLowerCase() === 'true',
     JD_HOST: process.env.JD_HOST,
     JD_API_PORT: process.env.JD_API_PORT,
     PATHS_JD_SERIES: process.env.PATHS_JD_SERIES,

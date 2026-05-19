@@ -147,22 +147,29 @@ document.addEventListener('DOMContentLoaded', () => {
         hide(dom('login-overlay'));
         show(dom('app-container'));
         
-        // --- JDownloader Toggle ---
-        const toggleJd = document.getElementById('toggle-jd');
-        if (toggleJd) {
-            const savedState = localStorage.getItem('useJD');
-            if (savedState !== null) toggleJd.checked = savedState === 'true';
-            toggleJd.addEventListener('change', (e) => localStorage.setItem('useJD', e.target.checked));
-        }
-
         // --- Source Detection & Dynamic Options ---
+        let serverJdDefault = false;
         try {
             const statusData = await apiCall('/status');
             state.activeSources = statusData.activeSources || [];
             state.availableSources = statusData.availableSources || [];
+            serverJdDefault = !!statusData.jdDefault;
             renderSourcesUI();
             updateLocalDbFiltersVisibility();
         } catch(e) { console.error('Erreur détection source:', e); }
+
+        // --- JDownloader Toggle ---
+        // Priority: user's localStorage choice > server JD_ENABLED default > off.
+        const toggleJd = document.getElementById('toggle-jd');
+        if (toggleJd) {
+            const savedState = localStorage.getItem('useJD');
+            if (savedState !== null) {
+                toggleJd.checked = savedState === 'true';
+            } else {
+                toggleJd.checked = serverJdDefault;
+            }
+            toggleJd.addEventListener('change', (e) => localStorage.setItem('useJD', e.target.checked));
+        }
 
         loadTrending();
         lucide.createIcons();
