@@ -208,6 +208,58 @@ router.post('/get-link', apiLimiter, authMiddleware, async (req, res) => {
     }
 });
 
+// ========================= GET LINKS BATCH =========================
+
+router.post('/get-links-batch', apiLimiter, authMiddleware, async (req, res) => {
+    const { chosenIds, useJD } = req.body;
+    if (!chosenIds || !Array.isArray(chosenIds)) return res.status(400).json({ error: "Tableau d'IDs manquant." });
+    
+    const { currentTitleName, isSeries, directUrlMap, currentSelectionSource } = globalState;
+    const activeSource = currentSelectionSource ? sourceRegistry.get(currentSelectionSource) : null;
+
+    console.log(`\n--- Get Links Batch [${activeSource?.name.toUpperCase()}]: ${chosenIds.length} liens pour "${currentTitleName}" (JD: ${useJD !== false}) ---`);
+
+    try {
+        const results: string[] = [];
+        const errors: string[] = [];
+
+        for (const chosenId of chosenIds) {
+            try {
+                let finalLink: string | null = null;
+                if (directUrlMap[String(chosenId)]) {
+                    finalLink = directUrlMap[String(chosenId)];
+                } else if (activeSource?.resolveLink) {
+                    finalLink = await activeSource.resolveLink(String(chosenId));
+                }
+
+                if (finalLink) {
+                    results.push(finalLink);
+                    if (useJD !== false) {
+                        await sendToJDownloader(finalLink, currentTitleName || 'Unknown', isSeries);
+                    }
+                } else {
+                    errors.push(`ID ${chosenId} introuvable.`);
+                }
+            } catch (err: any) {
+                errors.push(`Erreur pour ID ${chosenId}: ${err.message}`);
+            }
+        }
+
+        if (results.length === 0) {
+            return res.status(500).json({ error: "Aucun lien n'a pu être résolu.", details: errors });
+        }
+
+        if (useJD !== false) {
+            res.json({ status: 'succès', message: `${results.length} lien(s) envoyé(s) à JDownloader !`, errors: errors.length > 0 ? errors : undefined });
+        } else {
+            res.json({ status: 'succès', message: `${results.length} lien(s) récupéré(s) !`, links: results, errors: errors.length > 0 ? errors : undefined });
+        }
+    } catch (error: any) {
+        console.error("Erreur /get-links-batch:", error.message);
+        res.status(500).json({ error: `Erreur serveur: ${error.message}` });
+    }
+});
+
 // ========================= MOVIEX DECODE =========================
 
 router.get('/movix-decode/:lienId', async (req, res) => {

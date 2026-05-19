@@ -612,6 +612,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const body = dom('modal-body');
         body.innerHTML = '';
 
+        const selectedIds = new Set();
+        const updateBatchUI = () => {
+            const count = selectedIds.size;
+            const container = document.getElementById('batch-download-container');
+            if (container) {
+                container.style.display = count > 0 ? 'block' : 'none';
+                const countSpan = document.getElementById('batch-count');
+                if (countSpan) countSpan.textContent = count;
+            }
+        };
+
         // --- 0. TYPE DETECTION ---
         const hasSaisonLabel = data.seasons && data.seasons.some(s => s.label.toLowerCase().includes('saison'));
         const hasNumericEpisodes = data.clientOptions && data.clientOptions.some(q => {
@@ -743,9 +754,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const hostGroups = new Map();
             toShow.forEach(q => {
                 let hostKey = q.host || 'inconnu';
-                if (source === 'localdb' && isActuallySeries) {
-                    hostKey = 'Épisodes';
-                }
                 if (!hostGroups.has(hostKey)) hostGroups.set(hostKey, []);
                 hostGroups.get(hostKey).push(q);
             });
@@ -765,6 +773,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 hostHeader.textContent = hostDisplay;
                 filesContainer.appendChild(hostHeader);
 
+                // Sort items by episode number
+                items.sort((a, b) => {
+                    if (a.isFullSeason && !b.isFullSeason) return -1;
+                    if (!a.isFullSeason && b.isFullSeason) return 1;
+                    
+                    const numA = a.episode ? parseFloat(a.episode.toString().replace(/[^0-9.]/g, '')) || 0 : 0;
+                    const numB = b.episode ? parseFloat(b.episode.toString().replace(/[^0-9.]/g, '')) || 0 : 0;
+                    return numA - numB;
+                });
                 
                 const itemsGrid = document.createElement('div');
                 itemsGrid.className = isActuallySeries ? "seasons-grid" : "files-list";
@@ -793,6 +810,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         row.style.alignItems = 'center';
                         row.style.padding = "8px 14px";
                         row.style.cursor = "pointer";
+                        row.style.gap = "20px"; // Added gap to space out the content from the buttons
                         
                         let buttonsHtml = '';
                         if (isHydracker) {
@@ -814,8 +832,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             `;
                         }
 
+                        const isChecked = selectedIds.has(q.id);
                         row.innerHTML = `
                             <div style="display: flex; align-items: center;">
+                                <div class="batch-checkbox" data-id="${q.id}" style="cursor: pointer; display: flex; align-items: center; color: ${isChecked ? 'var(--primary)' : 'var(--text-sec)'}; margin-right: 8px;">
+                                    <i data-lucide="${isChecked ? 'check-square' : 'square'}" style="width: 18px; height: 18px;"></i>
+                                </div>
                                 ${rankIcon ? `<span style="margin-right:5px">${rankIcon}</span>` : ''}
                                 <span>${episodeLabel}</span>
                             </div>
@@ -852,9 +874,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             `;
                         }
 
+                        const isChecked = selectedIds.has(q.id);
                         row.innerHTML = `
                             <div class="file-btn-left">
                                 <div class="file-host">
+                                    <div class="batch-checkbox" data-id="${q.id}" style="cursor: pointer; display: flex; align-items: center; color: ${isChecked ? 'var(--primary)' : 'var(--text-sec)'}; margin-right: 8px;">
+                                        <i data-lucide="${isChecked ? 'check-square' : 'square'}" style="width: 18px; height: 18px;"></i>
+                                    </div>
                                     ${rankIcon ? `<span class="rank-icon">${rankIcon}</span>` : ''}
                                     <span class="host-name">${hostDisplay}</span>
                                     ${mirrorLabel}
@@ -864,6 +890,24 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                             ${buttonsHtml}
                         `;
+                    }
+
+                    const chk = row.querySelector('.batch-checkbox');
+                    if (chk) {
+                        chk.onclick = (e) => {
+                            e.stopPropagation();
+                            if (selectedIds.has(q.id)) {
+                                selectedIds.delete(q.id);
+                                chk.innerHTML = '<i data-lucide="square" style="width: 18px; height: 18px;"></i>';
+                                chk.style.color = 'var(--text-sec)';
+                            } else {
+                                selectedIds.add(q.id);
+                                chk.innerHTML = '<i data-lucide="check-square" style="width: 18px; height: 18px;"></i>';
+                                chk.style.color = 'var(--primary)';
+                            }
+                            lucide.createIcons({ root: chk });
+                            updateBatchUI();
+                        };
                     }
 
                     // On attache l'event listener Movix UNIQUEMENT si on est sur Hydracker
@@ -958,6 +1002,50 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         renderFiles(activeVersion);
+
+        const batchDownloadContainer = document.createElement('div');
+        batchDownloadContainer.id = 'batch-download-container';
+        batchDownloadContainer.style = 'display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 1rem;';
+        batchDownloadContainer.innerHTML = `
+            <button class="btn-primary" id="btn-batch-download" style="width: 100%; display: flex; justify-content: center; align-items: center; gap: 8px;">
+                <i data-lucide="download"></i> Télécharger la sélection (<span id="batch-count">0</span>)
+            </button>
+        `;
+        body.appendChild(batchDownloadContainer);
+
+        const btnBatch = batchDownloadContainer.querySelector('#btn-batch-download');
+        btnBatch.onclick = async () => {
+            if (selectedIds.size === 0) return;
+            hide(dom('modal-overlay'));
+            toggleBlockingLoader(true, "Récupération des liens...");
+            try {
+                const useJD = document.getElementById('toggle-jd') ? document.getElementById('toggle-jd').checked : true;
+                const result = await apiCall('/get-links-batch', 'POST', { chosenIds: Array.from(selectedIds), useJD });
+                toggleBlockingLoader(false);
+
+                if (useJD) {
+                    showToast(result.message || 'Liens envoyés à JDownloader !');
+                    document.querySelector('.nav-links li[data-target="section-downloads"]').click();
+                } else {
+                    showModal('Liens Directs', `
+                        <div class="direct-link-box">
+                            <p style="margin-bottom: 10px;">Voici vos liens de téléchargement :</p>
+                            <textarea readonly id="direct-links-input" style="width: 100%; height: 150px; background: var(--bg-main); border: 1px solid var(--border); color: white; border-radius: var(--radius); margin-bottom: 15px; padding: 12px; font-family: monospace; white-space: pre;">${(result.links || []).join('\n')}</textarea>
+                            <div class="btn-group" style="display: flex; gap: 10px;">
+                                <button class="btn-primary" style="flex: 1;" onclick="document.getElementById('direct-links-input').select(); document.execCommand('copy'); showToast('Copiés !')">Tout Copier</button>
+                            </div>
+                        </div>
+                    `);
+                }
+            } catch (err) {
+                toggleBlockingLoader(false);
+                showToast("Erreur: " + err.message);
+                show(dom('modal-overlay'));
+            }
+        };
+        
+        updateBatchUI();
+        lucide.createIcons({ root: batchDownloadContainer });
     };
 
 
