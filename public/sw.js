@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hydrhacked-v11';
+const CACHE_NAME = 'hydrhacked-v12';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

@@ -188,9 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.activeSources = s.activeSources || [];
                 
                 const searchInput = dom('search-input');
-                const searchBtn = dom('btn-search-trigger');
                 if (searchInput) searchInput.disabled = s.isOffline;
-                if (searchBtn) searchBtn.disabled = s.isOffline;
 
                 const trendingHidden = updateTrendingVisibility();
                 if (!trendingHidden && !s.isOffline && (wasOffline || (!state.trendingData.films.length && !state.trendingData.series.length))) {
@@ -530,7 +528,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- SEARCH ---
     const searchInput = dom('search-input');
-    const searchBtn = dom('btn-search-trigger');
     const searchRadios = document.querySelectorAll('input[name="search-type"]');
     let searchTimeout = null;
 
@@ -590,14 +587,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (searchTimeout) clearTimeout(searchTimeout);
                 performSearch();
             }
-        });
-    }
-
-    if (searchBtn) {
-        searchBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (searchTimeout) clearTimeout(searchTimeout);
-            performSearch();
         });
     }
 
