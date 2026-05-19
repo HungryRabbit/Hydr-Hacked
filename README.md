@@ -60,7 +60,7 @@
 
 ### 🐳 Via Docker (Recommandé)
 
-C'est la méthode la plus simple pour garder un environnement propre. L'image est désormais **construite localement** à partir du `Dockerfile` du dépôt (build multi-stage, runtime non-root, FS en lecture seule, port lié à `127.0.0.1` uniquement).
+C'est la méthode la plus simple pour garder un environnement propre. Le `docker-compose.yml` est configuré pour fonctionner de deux manières — vous choisissez selon vos besoins.
 
 ```bash
 # 1. Cloner le projet (si ce n'est pas déjà fait)
@@ -68,14 +68,24 @@ git clone https://github.com/NoNoBzH22/Hydr-Hacked
 
 # 2. Préparer la configuration
 cp .env.example .env
+```
 
-# 3. Construire et lancer l'application
+**Option A — Image pré-construite (par défaut, le plus rapide) :**
+```bash
+docker compose up -d
+```
+Récupère `ghcr.io/nonobzh22/hydrhacked:latest` depuis GHCR. Aucun toolchain local requis.
+
+**Option B — Build local (si vous avez modifié le `Dockerfile` ou souhaitez auditer le build) :**
+```bash
 docker compose up -d --build
 ```
+Construit l'image à partir du `Dockerfile` du dépôt (build multi-stage, runtime non-root, FS en lecture seule, port lié à `127.0.0.1` uniquement). Le résultat est tagué localement et réutilisé aux lancements suivants.
+
 📍 Accès : `http://localhost:3067`
 
 > [!TIP]
-> Après une `git pull`, relancez `docker compose up -d --build` pour reconstruire l'image avec les dernières modifications.
+> Pour mettre à jour : `docker compose pull && docker compose up -d` (Option A) ou `git pull && docker compose up -d --build` (Option B).
 
 ---
 

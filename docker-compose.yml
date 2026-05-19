@@ -1,12 +1,20 @@
 services:
   hydrhacked:
-    # Build the image locally from the Dockerfile in this repo.
-    # Pin a fixed tag so `docker compose up` doesn't accidentally rebuild
-    # silently when the Dockerfile changes — bump it when you rebuild.
+    # Two ways to run, pick one:
+    #
+    #   1. Pre-built image (default):  docker compose up -d
+    #      Pulls ghcr.io/nonobzh22/hydrhacked:latest. Fast, no toolchain
+    #      needed. Use this unless you've patched the Dockerfile locally.
+    #
+    #   2. Local build:                docker compose up -d --build
+    #      Builds from the Dockerfile in this repo and tags the result
+    #      with the `image:` name below, so subsequent `up` runs reuse
+    #      it without pulling. Use this if you changed the Dockerfile,
+    #      need to audit the build, or are working offline.
+    image: ghcr.io/nonobzh22/hydrhacked:latest
     build:
       context: .
       dockerfile: Dockerfile
-    # image: hydr-hacked:local
     container_name: hydrhacked_app
     restart: unless-stopped
 
