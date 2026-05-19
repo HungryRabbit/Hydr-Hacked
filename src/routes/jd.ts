@@ -9,8 +9,8 @@ router.post('/jd/add', authMiddleware, async (req, res) => {
     if (!link) return res.status(400).json({ error: "Lien manquant." });
 
     try {
-        await sendToJDownloader(link, packageName || 'Manual Add', !!isSeries);
-        res.json({ success: true });
+        const ok = await sendToJDownloader(link, packageName || 'Manual Add', !!isSeries);
+        res.json({ success: ok, jdSent: ok });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }

@@ -3,18 +3,21 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // --- JDownloader ---
-export async function sendToJDownloader(link: string, titleName: string, isSeries: boolean = false) {
+// Returns true iff a .crawljob file was actually written. Returns false
+// (rather than throwing) when JD paths are not configured, so callers
+// can fall back to showing the direct link to the user.
+export async function sendToJDownloader(link: string, titleName: string, isSeries: boolean = false): Promise<boolean> {
     if (!CONFIG.PATHS_JD_WATCH) {
         console.error("Erreur JDownloader: PATHS_JD_WATCH non configuré.");
-        return;
+        return false;
     }
     if (!CONFIG.PATHS_JD_FILMS) {
         console.error("Erreur JDownloader: PATHS_JD_FILMS non configuré.");
-        return;
+        return false;
     }
     if (!CONFIG.PATHS_JD_SERIES) {
         console.error("Erreur JDownloader: PATHS_JD_SERIES non configuré.");
-        return;
+        return false;
     }
 
     const fileName = `link_${Date.now()}.crawljob`;
@@ -58,7 +61,9 @@ export async function sendToJDownloader(link: string, titleName: string, isSerie
             console.log("Note: Impossible de changer le propriétaire (chown).");
         }
         console.log(`✅ Fichier .crawljob (${fileName}) créé.`);
+        return true;
     } catch (error: any) {
         console.error(`❌ Erreur JDownloader (${fileName}):`, error.message);
+        return false;
     }
 }
