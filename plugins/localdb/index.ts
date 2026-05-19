@@ -5,10 +5,22 @@ import fs from 'fs';
 import path from 'path';
 import { DatabaseSync } from 'node:sqlite';
 
+type IndexedTitle = {
+    norm: string;
+    normOrig: string;
+    title_name: string;
+    original_title: string | null;
+    tmdb_id: number;
+    category_name: string;
+    title_poster: string | null;
+    created_at: string | null;
+};
+
 export class LocalDatabaseAPI implements ISource {
     name = 'localdb';
     private db: any = null;
     private dbPath: string;
+    private titleIndex: IndexedTitle[] | null = null;
 
     constructor() {
         this.dbPath = path.resolve(CONFIG.DB_PATH || './database/darkiworld.db');
@@ -20,8 +32,19 @@ export class LocalDatabaseAPI implements ISource {
             return false;
         }
         try {
-            // Utilise le module natif node:sqlite de Node.js v22+
-            this.db = new DatabaseSync(this.dbPath);
+            // readOnly avoids journal/WAL writes (plugin only reads).
+            this.db = new DatabaseSync(this.dbPath, { readOnly: true });
+            // Keep SQLite's temp store in RAM so big GROUP BY / sort
+            // operations don't spill to /tmp (a small tmpfs in the
+            // hardened container). Also bump page cache + mmap for
+            // the initial index scan.
+            for (const p of [
+                'PRAGMA temp_store = MEMORY',
+                'PRAGMA cache_size = -8000',     // ~8MB page cache
+                'PRAGMA mmap_size = 67108864',   // 64MB mmap, not 256MB
+            ]) {
+                this.db.prepare(p).run();
+            }
             return true;
         } catch (e: any) {
             console.error('[LocalDB] ❌ Erreur lors de l\'ouverture de la base SQLite native:', e.message);
@@ -31,6 +54,84 @@ export class LocalDatabaseAPI implements ISource {
 
     async healthCheck(): Promise<boolean> {
         return this.initDb();
+    }
+
+    // Lowercase, strip diacritics, strip apostrophes, collapse to alnum tokens.
+    // "Pokémon: l'aventure" -> "pokemon l aventure"
+    private static normalize(s: string | null | undefined): string {
+        if (!s) return '';
+        return s
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[̀-ͯ]/g, '')
+            .replace(/['"`’ʼ]/g, '')
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+    }
+
+    // Bounded Levenshtein. Returns max+1 if it would exceed `max` (cheap exit).
+    private static editDistance(a: string, b: string, max: number): number {
+        const la = a.length, lb = b.length;
+        if (Math.abs(la - lb) > max) return max + 1;
+        if (la === 0) return lb;
+        if (lb === 0) return la;
+        let prev = new Array(lb + 1);
+        let curr = new Array(lb + 1);
+        for (let j = 0; j <= lb; j++) prev[j] = j;
+        for (let i = 1; i <= la; i++) {
+            curr[0] = i;
+            let rowMin = curr[0];
+            const ai = a.charCodeAt(i - 1);
+            for (let j = 1; j <= lb; j++) {
+                const cost = ai === b.charCodeAt(j - 1) ? 0 : 1;
+                const v = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+                curr[j] = v;
+                if (v < rowMin) rowMin = v;
+            }
+            if (rowMin > max) return max + 1;
+            const tmp = prev; prev = curr; curr = tmp;
+        }
+        return prev[lb];
+    }
+
+    // Per-token edit-distance budget. Short words must match almost exactly;
+    // longer words tolerate more typos.
+    private static fuzzyBudget(tok: string): number {
+        if (tok.length <= 3) return 0;
+        if (tok.length <= 5) return 1;
+        if (tok.length <= 8) return 2;
+        return 3;
+    }
+
+    private buildTitleIndex(): void {
+        if (this.titleIndex !== null) return;
+        if (!this.initDb()) { this.titleIndex = []; return; }
+
+        const t0 = Date.now();
+        const sql = `
+            SELECT title_name,
+                   original_title,
+                   tmdb_id,
+                   category_name,
+                   title_poster,
+                   MIN(created_at) AS created_at
+            FROM links_small
+            GROUP BY title_name, tmdb_id
+        `;
+        const rows = this.db.prepare(sql).all() as any[];
+
+        this.titleIndex = rows.map((r: any) => ({
+            norm: LocalDatabaseAPI.normalize(r.title_name),
+            normOrig: LocalDatabaseAPI.normalize(r.original_title),
+            title_name: r.title_name,
+            original_title: r.original_title,
+            tmdb_id: r.tmdb_id || 0,
+            category_name: r.category_name,
+            title_poster: r.title_poster,
+            created_at: r.created_at,
+        }));
+
+        console.log(`[LocalDB] Index construit: ${this.titleIndex.length} titres en ${Date.now() - t0}ms`);
     }
 
     private mapCategoryToType(category: string): MediaType {
@@ -66,43 +167,113 @@ export class LocalDatabaseAPI implements ISource {
             console.warn('[LocalDB] ⚠️ Base de données non initialisée ou introuvable.');
             return [];
         }
+        this.buildTitleIndex();
+        if (!this.titleIndex || this.titleIndex.length === 0) return [];
 
-        try {
-            const sql = `
-                SELECT title_name, tmdb_id, category_name, title_poster, created_at 
-                FROM links_small 
-                WHERE title_name LIKE ? OR original_title LIKE ?
-                GROUP BY title_name, tmdb_id 
-                ORDER BY created_at ASC 
-                LIMIT 150
-            `;
-            const stmt = this.db.prepare(sql);
-            const searchPattern = `%${query.trim()}%`;
-            const rows = stmt.all(searchPattern, searchPattern) as any[];
+        const q = LocalDatabaseAPI.normalize(query);
+        if (!q) return [];
+        const tokens = q.split(' ').filter(Boolean);
+        if (tokens.length === 0) return [];
 
-            const results: SearchResult[] = rows.map((row: any) => {
-                const type = this.mapCategoryToType(row.category_name);
-                const tmdbId = row.tmdb_id || 0;
-                return {
-                    title: row.title_name,
-                    year: row.created_at ? row.created_at.substring(0, 4) : null,
-                    image: row.title_poster || null,
-                    hrefPath: `localdb:${tmdbId}:${row.title_name}`,
-                    type,
-                    source: this.name
-                };
-            });
+        const scored: Array<{ idx: number; score: number }> = [];
 
-            if (mediaType === 'movie') {
-                return results.filter(r => r.type === 'movie' || r.type === 'anime');
-            } else if (mediaType === 'series') {
-                return results.filter(r => r.type === 'series' || r.type === 'anime');
-            } else {
-                return results.filter(r => r.type === mediaType);
+        for (let i = 0; i < this.titleIndex.length; i++) {
+            const entry = this.titleIndex[i];
+            const t = entry.norm;
+            const o = entry.normOrig;
+
+            let score = 0;
+
+            // Tier 1: exact normalized match on either title field
+            if (t === q || (o && o === q)) {
+                score = 1000;
             }
-        } catch (e: any) {
-            console.error('[LocalDB] Erreur lors de la recherche:', e.message);
-            return [];
+            // Tier 2: title starts with the full query
+            else if (t.startsWith(q) || (o && o.startsWith(q))) {
+                score = 800;
+            }
+            // Tier 3: query appears as a whole-word substring
+            else if ((' ' + t + ' ').includes(' ' + q + ' ') ||
+                     (o && (' ' + o + ' ').includes(' ' + q + ' '))) {
+                score = 700;
+            }
+            // Tier 4: raw substring (partial word)
+            else if (t.includes(q) || (o && o.includes(q))) {
+                score = 600;
+            }
+            // Tier 5: per-token matching, exact-then-fuzzy, any word order.
+            // Words are computed on demand instead of stored, to keep the
+            // index small (104K titles × stored word arrays is too heavy).
+            else {
+                const words = (entry.norm + ' ' + (entry.normOrig || '')).split(' ').filter(Boolean);
+                let exactMatched = 0;
+                let fuzzyMatched = 0;
+                let fuzzyPenalty = 0;
+                let anyMatched = false;
+
+                for (const tok of tokens) {
+                    let exact = false;
+                    for (const w of words) {
+                        if (w === tok || w.startsWith(tok)) { exact = true; break; }
+                    }
+                    if (exact) {
+                        exactMatched++;
+                        anyMatched = true;
+                        continue;
+                    }
+                    const budget = LocalDatabaseAPI.fuzzyBudget(tok);
+                    if (budget === 0) continue;
+                    let best = budget + 1;
+                    for (const w of words) {
+                        if (Math.abs(w.length - tok.length) > budget) continue;
+                        const d = LocalDatabaseAPI.editDistance(tok, w, budget);
+                        if (d < best) { best = d; if (best <= 1) break; }
+                    }
+                    if (best <= budget) {
+                        fuzzyMatched++;
+                        fuzzyPenalty += best;
+                        anyMatched = true;
+                    }
+                }
+
+                const totalMatched = exactMatched + fuzzyMatched;
+                if (totalMatched === tokens.length) {
+                    // All tokens covered — strong signal even when some were fuzzy
+                    score = 400 - fuzzyPenalty * 30 + exactMatched * 5;
+                } else if (anyMatched) {
+                    // Partial coverage — only meaningful for multi-word queries
+                    score = Math.round(120 * (totalMatched / tokens.length)) - fuzzyPenalty * 10;
+                }
+            }
+
+            if (score > 0) {
+                // Tiebreakers: shorter titles win; original_title field is a small bonus when it helped
+                score += Math.max(0, 30 - t.length);
+                scored.push({ idx: i, score });
+            }
+        }
+
+        scored.sort((a, b) => b.score - a.score);
+
+        const results: SearchResult[] = scored.slice(0, 150).map(({ idx }) => {
+            const r = this.titleIndex![idx];
+            const type = this.mapCategoryToType(r.category_name);
+            return {
+                title: r.title_name,
+                year: r.created_at ? r.created_at.substring(0, 4) : null,
+                image: r.title_poster || null,
+                hrefPath: `localdb:${r.tmdb_id}:${r.title_name}`,
+                type,
+                source: this.name
+            };
+        });
+
+        if (mediaType === 'movie') {
+            return results.filter(r => r.type === 'movie' || r.type === 'anime');
+        } else if (mediaType === 'series') {
+            return results.filter(r => r.type === 'series' || r.type === 'anime');
+        } else {
+            return results.filter(r => r.type === mediaType);
         }
     }
 
