@@ -73,12 +73,12 @@ export async function checkSiteStatus() {
         }));
 
         for (const result of results) {
-            if (result.status === 'fulfilled' && result.value.films && result.value.films.length > 0) {
+            if (result.status === 'fulfilled') {
                 const { source, films, series } = result.value;
                 onlineSourcesCount++;
-                allFilms = allFilms.concat(films);
-                if (series) allSeries = allSeries.concat(series);
-                console.log(`[${source.name.toUpperCase()}] ${films.length} films, ${series?.length || 0} séries.`);
+                if (films && films.length > 0) allFilms = allFilms.concat(films);
+                if (series && series.length > 0) allSeries = allSeries.concat(series);
+                console.log(`[${source.name.toUpperCase()}] ${films?.length || 0} films, ${series?.length || 0} séries.`);
             } else if (result.status === 'rejected') {
                 console.error(`[Erreur] Source indisponible: ${result.reason}`);
             }
