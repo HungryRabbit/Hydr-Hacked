@@ -569,6 +569,17 @@ input:-webkit-autofill:active {
     min-width: 180px;
 }
 
+/* For the movie quality pill row — it wants more horizontal room than the
+   host dropdown next to it, since each pill is roughly as wide as a label. */
+.selection-filter.selection-filter-wide {
+    flex: 3 1 320px;
+}
+
+.selection-filter-wide .version-tabs {
+    margin-top: 0;
+    flex-wrap: wrap;
+}
+
 .selection-filter label {
     font-size: 0.72rem;
     font-weight: 700;

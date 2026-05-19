@@ -955,7 +955,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // --- 2a. QUALITY + HOST FILTER DROPDOWNS ---
+        // --- 2a. QUALITY + HOST FILTERS ---
+        // - Series: both are dropdowns (the table already filters down to a
+        //   single quality, so an at-a-glance pill row buys nothing).
+        // - Movies: quality is a row of pills — fewer qualities per movie,
+        //   and seeing every option without opening a menu is the whole point.
+        //   Host stays a dropdown either way.
         const allVersions = [...new Set(enriched.map(q => q.quality || 'Inconnu'))];
 
         const h4files = document.createElement('h4');
@@ -963,8 +968,6 @@ document.addEventListener('DOMContentLoaded', () => {
         h4files.className = "modal-subtitle";
         body.appendChild(h4files);
 
-        // Pick the initial quality from the user's settings preference if it
-        // exists in the current dataset; fall back to the first available.
         const qualityPrefKey = isActuallySeries ? 'defaultQualitySeries' : 'defaultQualityMovie';
         const savedQuality = localStorage.getItem(qualityPrefKey);
         let activeVersion = (savedQuality && allVersions.includes(savedQuality))
@@ -975,28 +978,59 @@ document.addEventListener('DOMContentLoaded', () => {
         filterRow.className = 'selection-filters';
         body.appendChild(filterRow);
 
-        const buildFilter = (labelText, sel) => {
+        const buildFilter = (labelText, control, extraClass) => {
             const wrap = document.createElement('div');
-            wrap.className = 'selection-filter';
+            wrap.className = 'selection-filter' + (extraClass ? ' ' + extraClass : '');
             const label = document.createElement('label');
             label.textContent = labelText;
-            label.htmlFor = sel.id;
+            if (control.id) label.htmlFor = control.id;
             wrap.appendChild(label);
-            wrap.appendChild(sel);
+            wrap.appendChild(control);
             return wrap;
         };
 
-        const qualitySelect = document.createElement('select');
-        qualitySelect.className = 'season-select';
-        qualitySelect.id = 'filter-quality';
-        allVersions.forEach(v => {
-            const o = document.createElement('option');
-            o.value = v;
-            o.textContent = v;
-            qualitySelect.appendChild(o);
-        });
-        qualitySelect.value = activeVersion;
-        filterRow.appendChild(buildFilter('Qualité', qualitySelect));
+        const onQualityChange = () => {
+            refreshHostOptions();
+            renderFiles();
+        };
+
+        if (isActuallySeries) {
+            const qualitySelect = document.createElement('select');
+            qualitySelect.className = 'season-select';
+            qualitySelect.id = 'filter-quality';
+            allVersions.forEach(v => {
+                const o = document.createElement('option');
+                o.value = v;
+                o.textContent = v;
+                qualitySelect.appendChild(o);
+            });
+            qualitySelect.value = activeVersion;
+            qualitySelect.addEventListener('change', () => {
+                activeVersion = qualitySelect.value;
+                onQualityChange();
+            });
+            filterRow.appendChild(buildFilter('Qualité', qualitySelect));
+        } else {
+            const pillsWrap = document.createElement('div');
+            pillsWrap.className = 'version-tabs';
+            const pillByVersion = new Map();
+            allVersions.forEach(v => {
+                const pill = document.createElement('button');
+                pill.type = 'button';
+                pill.className = 'version-tab';
+                if (v === activeVersion) pill.classList.add('active');
+                pill.textContent = v;
+                pill.addEventListener('click', () => {
+                    if (activeVersion === v) return;
+                    activeVersion = v;
+                    pillByVersion.forEach((node, key) => node.classList.toggle('active', key === v));
+                    onQualityChange();
+                });
+                pillByVersion.set(v, pill);
+                pillsWrap.appendChild(pill);
+            });
+            filterRow.appendChild(buildFilter('Qualité', pillsWrap, 'selection-filter-wide'));
+        }
 
         const hostSelect = document.createElement('select');
         hostSelect.className = 'season-select';
@@ -1010,7 +1044,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Refresh host options every time the quality changes — hosts available
         // for "Blu-Ray 1080p" aren't necessarily the same as for "WEB-DL 720p".
         const refreshHostOptions = () => {
-            const subset = enriched.filter(q => (q.quality || 'Inconnu') === qualitySelect.value);
+            const subset = enriched.filter(q => (q.quality || 'Inconnu') === activeVersion);
             const hosts = [...new Set(subset.map(q => q.host || 'Inconnu'))].sort();
             hostSelect.replaceChildren();
             const all = document.createElement('option');
@@ -1277,10 +1311,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const renderFiles = () => {
             filesContainer.replaceChildren();
-            const selectedQuality = qualitySelect.value;
             const selectedHost = hostSelect.value;
             const toShow = enriched.filter(q =>
-                (q.quality || 'Inconnu') === selectedQuality &&
+                (q.quality || 'Inconnu') === activeVersion &&
                 (!selectedHost || (q.host || 'Inconnu') === selectedHost)
             );
 
@@ -1543,10 +1576,6 @@ document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();
         };
 
-        qualitySelect.addEventListener('change', () => {
-            refreshHostOptions();
-            renderFiles();
-        });
         hostSelect.addEventListener('change', renderFiles);
 
         refreshHostOptions();
