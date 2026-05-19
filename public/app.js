@@ -917,14 +917,272 @@ document.addEventListener('DOMContentLoaded', () => {
         filesContainer.className = 'files-list';
         body.appendChild(filesContainer);
 
+        const renderSeriesTable = (parent, items) => {
+            // Detect which optional columns have any data — empty ones are
+            // hidden so plugins that don't populate the richer metadata
+            // (e.g. ZT) still get a tidy table.
+            const has = {
+                name: items.some(q => q.episodeName),
+                audio: items.some(q => (q.audioLangs && q.audioLangs.length) || (q.langs && q.langs.some(l => !String(l).startsWith('Subs:')))),
+                sub: items.some(q => q.subLangs && q.subLangs.length),
+            };
+
+            // Duplicate detection: group by episode (or "saison complète"),
+            // then mark cells that differ within a multi-row group.
+            const groups = new Map();
+            items.forEach(item => {
+                const key = item.isFullSeason
+                    ? 'full'
+                    : (item.episodeNumber ? `ep${item.episodeNumber}` : `raw${item.episode || ''}`);
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(item);
+            });
+            const diffMap = new Map();
+            const accessors = {
+                size:  i => i.size || '',
+                host:  i => i.host || '',
+                audio: i => (i.audioLangs && i.audioLangs.length)
+                    ? i.audioLangs.join(',')
+                    : (i.langs || []).filter(l => !String(l).startsWith('Subs:')).join(','),
+                sub:   i => (i.subLangs && i.subLangs.length) ? i.subLangs.join(',') : '',
+            };
+            for (const group of groups.values()) {
+                if (group.length < 2) continue;
+                for (const [col, acc] of Object.entries(accessors)) {
+                    const values = new Set(group.map(acc));
+                    if (values.size > 1) {
+                        group.forEach(item => {
+                            const k = String(item.id);
+                            if (!diffMap.has(k)) diffMap.set(k, new Set());
+                            diffMap.get(k).add(col);
+                        });
+                    }
+                }
+            }
+
+            const table = document.createElement('table');
+            table.className = 'episodes-table';
+
+            // Header
+            const thead = document.createElement('thead');
+            const trHead = document.createElement('tr');
+            let headerCb = null;
+            if (multiSelect) {
+                const thSel = document.createElement('th');
+                thSel.className = 'col-sel';
+                headerCb = document.createElement('input');
+                headerCb.type = 'checkbox';
+                headerCb.title = 'Tout sélectionner';
+                thSel.appendChild(headerCb);
+                trHead.appendChild(thSel);
+            }
+            const cols = [
+                { label: 'Épisode', cls: 'col-ep' },
+                ...(has.name  ? [{ label: 'Titre',       cls: 'col-name' }]    : []),
+                { label: 'Qualité', cls: 'col-quality' },
+                { label: 'Taille',  cls: 'col-size' },
+                ...(has.audio ? [{ label: 'Audio',       cls: 'col-audio' }]   : []),
+                ...(has.sub   ? [{ label: 'Sous-titres', cls: 'col-sub' }]     : []),
+                { label: 'Hôte',   cls: 'col-host' },
+                { label: '',       cls: 'col-action' },
+            ];
+            cols.forEach(c => {
+                const th = document.createElement('th');
+                th.className = c.cls;
+                th.textContent = c.label;
+                trHead.appendChild(th);
+            });
+            thead.appendChild(trHead);
+            table.appendChild(thead);
+
+            // Body
+            const tbody = document.createElement('tbody');
+            table.appendChild(tbody);
+            const rowSetters = [];
+
+            items.forEach(q => {
+                const tr = document.createElement('tr');
+                tr.dataset.id = q.id != null ? String(q.id) : '';
+                const diffs = diffMap.get(tr.dataset.id) || new Set();
+
+                let setSelected = null;
+                let rowCb = null;
+                if (multiSelect) {
+                    const tdSel = document.createElement('td');
+                    tdSel.className = 'col-sel';
+                    rowCb = document.createElement('input');
+                    rowCb.type = 'checkbox';
+                    rowCb.dataset.id = tr.dataset.id;
+                    rowCb.checked = selectionState.items.has(rowCb.dataset.id);
+                    if (rowCb.checked) tr.classList.add('is-selected');
+
+                    setSelected = (on) => {
+                        rowCb.checked = on;
+                        tr.classList.toggle('is-selected', on);
+                        if (!rowCb.dataset.id) return;
+                        if (on) {
+                            selectionState.items.set(rowCb.dataset.id, {
+                                id: rowCb.dataset.id,
+                                host: q.host || '',
+                                quality: q.quality || '',
+                                episode: q.episode || '',
+                                isFullSeason: !!q.isFullSeason
+                            });
+                        } else {
+                            selectionState.items.delete(rowCb.dataset.id);
+                        }
+                        if (onSelectionChange) onSelectionChange();
+                        updateHeaderState();
+                    };
+                    rowCb.addEventListener('change', () => setSelected(rowCb.checked));
+                    tdSel.appendChild(rowCb);
+                    tr.appendChild(tdSel);
+                    rowSetters.push({ cb: rowCb, setSelected });
+                }
+
+                // Épisode
+                const epTd = document.createElement('td');
+                epTd.className = 'col-ep';
+                if (q.isFullSeason) {
+                    const badge = document.createElement('span');
+                    badge.className = 'ep-badge ep-badge-full';
+                    badge.textContent = '📦 Saison complète';
+                    epTd.appendChild(badge);
+                } else if (q.episodeNumber) {
+                    const badge = document.createElement('span');
+                    badge.className = 'ep-badge';
+                    badge.textContent = `Ep. ${String(q.episodeNumber).padStart(2, '0')}`;
+                    epTd.appendChild(badge);
+                } else {
+                    epTd.textContent = q.episode || '—';
+                }
+                tr.appendChild(epTd);
+
+                if (has.name) {
+                    const td = document.createElement('td');
+                    td.className = 'col-name';
+                    td.textContent = q.episodeName || '—';
+                    tr.appendChild(td);
+                }
+
+                const qualTd = document.createElement('td');
+                qualTd.className = 'col-quality';
+                qualTd.textContent = q.quality || '—';
+                tr.appendChild(qualTd);
+
+                const sizeTd = document.createElement('td');
+                sizeTd.className = 'col-size';
+                sizeTd.textContent = (q.size && q.size !== 'N/A') ? q.size : '—';
+                if (diffs.has('size')) sizeTd.classList.add('cell-diff');
+                tr.appendChild(sizeTd);
+
+                if (has.audio) {
+                    const td = document.createElement('td');
+                    td.className = 'col-audio';
+                    const audios = (q.audioLangs && q.audioLangs.length)
+                        ? q.audioLangs
+                        : (q.langs || []).filter(l => !String(l).startsWith('Subs:'));
+                    td.textContent = audios.length ? audios.join(', ') : '—';
+                    if (diffs.has('audio')) td.classList.add('cell-diff');
+                    tr.appendChild(td);
+                }
+
+                if (has.sub) {
+                    const td = document.createElement('td');
+                    td.className = 'col-sub';
+                    td.textContent = (q.subLangs && q.subLangs.length) ? q.subLangs.join(', ') : '—';
+                    if (diffs.has('sub')) td.classList.add('cell-diff');
+                    tr.appendChild(td);
+                }
+
+                const hostTd = document.createElement('td');
+                hostTd.className = 'col-host';
+                hostTd.textContent = q.host || '—';
+                if (diffs.has('host')) hostTd.classList.add('cell-diff');
+                tr.appendChild(hostTd);
+
+                const actTd = document.createElement('td');
+                actTd.className = 'col-action';
+                const dlBtn = document.createElement('button');
+                dlBtn.className = 'btn-action btn-dl';
+                dlBtn.title = 'Télécharger';
+                const icon = document.createElement('i');
+                icon.setAttribute('data-lucide', 'download');
+                icon.style.width = '16px';
+                icon.style.height = '16px';
+                dlBtn.appendChild(icon);
+                dlBtn.onclick = async (e) => {
+                    e.stopPropagation();
+                    toggleBlockingLoader(true, "Récupération du lien...");
+                    try {
+                        const useJD = document.getElementById('toggle-jd') ? document.getElementById('toggle-jd').checked : true;
+                        const result = await apiCall('/get-link', 'POST', { chosenId: q.id, useJD });
+                        toggleBlockingLoader(false);
+                        if (useJD && result.jdSent) {
+                            showToast('Lien envoyé à JDownloader !');
+                            document.querySelector('.nav-links li[data-target="section-downloads"]').click();
+                        } else {
+                            showDirectLinkModal(result.link);
+                        }
+                    } catch (err) {
+                        toggleBlockingLoader(false);
+                        showToast("Erreur: " + err.message);
+                    }
+                };
+                actTd.appendChild(dlBtn);
+                tr.appendChild(actTd);
+
+                if (multiSelect && setSelected && rowCb) {
+                    tr.addEventListener('click', (e) => {
+                        if (e.target.closest('button')) return;
+                        if (e.target === rowCb) return;
+                        setSelected(!rowCb.checked);
+                    });
+                }
+
+                tbody.appendChild(tr);
+            });
+
+            const updateHeaderState = () => {
+                if (!headerCb) return;
+                const cbs = tbody.querySelectorAll('input[type="checkbox"]');
+                if (!cbs.length) { headerCb.checked = false; headerCb.indeterminate = false; return; }
+                const checked = Array.from(cbs).filter(c => c.checked).length;
+                if (checked === 0) { headerCb.checked = false; headerCb.indeterminate = false; }
+                else if (checked === cbs.length) { headerCb.checked = true; headerCb.indeterminate = false; }
+                else { headerCb.checked = false; headerCb.indeterminate = true; }
+            };
+            if (multiSelect && headerCb) {
+                headerCb.addEventListener('change', () => {
+                    const target = headerCb.checked;
+                    rowSetters.forEach(({ cb, setSelected }) => {
+                        if (cb.checked !== target) setSelected(target);
+                    });
+                    updateHeaderState();
+                });
+                updateHeaderState();
+            }
+
+            parent.appendChild(table);
+            if (window.lucide) window.lucide.createIcons();
+        };
+
         const renderFiles = (version) => {
-            filesContainer.innerHTML = '';
+            filesContainer.replaceChildren();
             const toShow = allVersions.length > 1
                 ? enriched.filter(q => (q.quality || 'Inconnu') === version)
                 : enriched;
 
             if (toShow.length === 0) {
-                filesContainer.innerHTML = '<p class="empty-msg">Aucun fichier pour cette version.</p>';
+                const p = document.createElement('p');
+                p.className = 'empty-msg';
+                p.textContent = 'Aucun fichier pour cette version.';
+                filesContainer.appendChild(p);
+                return;
+            }
+
+            if (isActuallySeries) {
+                renderSeriesTable(filesContainer, toShow);
                 return;
             }
 
@@ -1196,6 +1454,63 @@ document.addEventListener('DOMContentLoaded', () => {
     const showModal = (title, content) => {
         dom('modal-title').textContent = title;
         dom('modal-body').innerHTML = content;
+        show(dom('modal-overlay'));
+    };
+
+    // Direct-link modal built from DOM nodes so a hostile URL coming back
+    // from the API can't smuggle markup into the body.
+    const showDirectLinkModal = (link) => {
+        const body = dom('modal-body');
+        dom('modal-title').textContent = 'Lien Direct';
+        body.replaceChildren();
+
+        const wrap = document.createElement('div');
+        wrap.className = 'direct-link-box';
+
+        const p = document.createElement('p');
+        p.style.marginBottom = '10px';
+        p.textContent = 'Voici votre lien de téléchargement :';
+        wrap.appendChild(p);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = link || '';
+        input.readOnly = true;
+        input.id = 'direct-link-input';
+        input.style.width = '100%';
+        input.style.marginBottom = '15px';
+        wrap.appendChild(input);
+
+        const btns = document.createElement('div');
+        btns.className = 'btn-group';
+        btns.style.display = 'flex';
+        btns.style.gap = '10px';
+
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'btn-primary';
+        copyBtn.style.flex = '1';
+        copyBtn.textContent = 'Copier';
+        copyBtn.addEventListener('click', () => {
+            input.select();
+            document.execCommand('copy');
+            showToast('Copié !');
+        });
+        btns.appendChild(copyBtn);
+
+        const openLink = document.createElement('a');
+        openLink.className = 'btn-success';
+        openLink.href = link || '#';
+        openLink.target = '_blank';
+        openLink.rel = 'noopener noreferrer';
+        openLink.style.flex = '1';
+        openLink.style.textAlign = 'center';
+        openLink.style.textDecoration = 'none';
+        openLink.style.display = 'inline-block';
+        openLink.textContent = 'Ouvrir';
+        btns.appendChild(openLink);
+
+        wrap.appendChild(btns);
+        body.appendChild(wrap);
         show(dom('modal-overlay'));
     };
 

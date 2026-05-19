@@ -554,6 +554,157 @@ input:-webkit-autofill:active {
     color: white;
 }
 
+.episodes-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    overflow: hidden;
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+}
+
+.episodes-table thead th {
+    text-align: left;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.55);
+    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.025);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    white-space: nowrap;
+}
+
+.episodes-table thead th.col-sel,
+.episodes-table tbody td.col-sel {
+    width: 36px;
+    text-align: center;
+    padding-left: 10px;
+    padding-right: 6px;
+}
+
+.episodes-table thead th.col-action,
+.episodes-table tbody td.col-action {
+    width: 48px;
+    text-align: right;
+    padding-right: 14px;
+}
+
+.episodes-table tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.92);
+    vertical-align: middle;
+}
+
+.episodes-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.episodes-table tbody tr {
+    transition: background-color 0.12s;
+    cursor: pointer;
+}
+
+.episodes-table tbody tr:nth-child(even) td {
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.episodes-table tbody tr:hover td {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.episodes-table tbody tr.is-selected td {
+    background: rgba(220, 38, 38, 0.12);
+}
+
+.episodes-table tbody tr.is-selected:hover td {
+    background: rgba(220, 38, 38, 0.18);
+}
+
+.episodes-table input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--primary);
+}
+
+.ep-badge {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.95);
+    font-weight: 600;
+    font-size: 0.8rem;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.ep-badge-full {
+    background: rgba(220, 38, 38, 0.18);
+    color: #fca5a5;
+}
+
+.episodes-table td.col-name {
+    color: rgba(255, 255, 255, 0.8);
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.episodes-table td.col-quality {
+    font-variant-caps: all-small-caps;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.78);
+}
+
+.episodes-table td.col-size,
+.episodes-table td.col-audio,
+.episodes-table td.col-sub {
+    color: rgba(255, 255, 255, 0.72);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.episodes-table td.col-host {
+    color: rgba(255, 255, 255, 0.72);
+    white-space: nowrap;
+}
+
+/* Cells that differ across a duplicate group get an amber outline so the
+   user can see at a glance what's different between two rows that share
+   the same episode + quality. */
+.episodes-table td.cell-diff {
+    box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.5);
+    background: rgba(245, 158, 11, 0.08) !important;
+    color: #fcd34d;
+    font-weight: 600;
+}
+
+.episodes-table .col-action button {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: white;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    transition: background-color 0.12s, transform 0.12s;
+}
+
+.episodes-table .col-action button:hover {
+    background: var(--primary);
+    transform: scale(1.05);
+}
+
 .season-group {
     margin-bottom: 1.5rem;
     background: rgba(255, 255, 255, 0.02);

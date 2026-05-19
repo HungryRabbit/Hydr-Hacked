@@ -23,6 +23,15 @@ export interface VideoLink {
     quality?: string;
     langs?: string[];
     episode?: string | null;
+    // Optional richer metadata. LocalDB populates all of these from the
+    // `links_small` table; other plugins MAY populate any subset. The
+    // frontend auto-hides columns that are empty across the whole dataset,
+    // so a plugin can simply leave fields undefined.
+    episodeNumber?: number | null;
+    episodeName?: string | null;
+    isFullSeason?: boolean;
+    audioLangs?: string[];
+    subLangs?: string[];
 }
 
 export interface ContentLinks {

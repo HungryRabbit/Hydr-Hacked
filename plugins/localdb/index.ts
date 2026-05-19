@@ -415,10 +415,20 @@ export class LocalDatabaseAPI implements ISource {
                 rows = this.db.prepare(sql).all(tmdbId, titleName) as any[];
             }
 
+            const splitLangs = (s: string | null | undefined): string[] => {
+                if (!s) return [];
+                return s.split(/[,;/]+/).map(p => p.trim()).filter(Boolean);
+            };
+
             const links: VideoLink[] = rows.map((row: any, i: number) => {
                 const idKey = row.link_id != null ? String(row.link_id) : `local_${i}`;
-                const langsList = row.audio_langs ? [row.audio_langs] : [];
-                if (row.sub_langs) langsList.push(`Subs: ${row.sub_langs}`);
+                const audioLangs = splitLangs(row.audio_langs);
+                const subLangs = splitLangs(row.sub_langs);
+
+                // Legacy `langs` field — kept for plugins/clients that don't
+                // know about audioLangs/subLangs yet.
+                const langsList = [...audioLangs];
+                if (subLangs.length) langsList.push(`Subs: ${subLangs.join(', ')}`);
 
                 return {
                     id: idKey,
@@ -428,9 +438,14 @@ export class LocalDatabaseAPI implements ISource {
                     sizeBytes: row.size_bytes || 0,
                     quality: row.quality_name || 'BDRip',
                     langs: langsList,
-                    episode: row.is_full_season 
-                        ? 'Saison complète' 
-                        : (row.episode_number ? `Épisode ${row.episode_number}` : null)
+                    episode: row.is_full_season
+                        ? 'Saison complète'
+                        : (row.episode_number ? `Épisode ${row.episode_number}` : null),
+                    episodeNumber: row.episode_number || null,
+                    episodeName: row.episode_name || null,
+                    isFullSeason: !!row.is_full_season,
+                    audioLangs,
+                    subLangs,
                 };
             });
 
