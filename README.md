@@ -24,9 +24,10 @@
 ## ✨ Fonctionnalités
 
 - 🔍 **Recherche & Tendances** : Chercher vos films et séries ou récupérer les tendances.
-- 🗄️ **Base de Données Locale** : Recherche instantanée et hors-ligne grâce au plugin natif LocalDB.
+- 🗄️ **Base de Données Locale** : Recherche instantanée et hors-ligne grâce au plugin natif LocalDB (recherche tokenisée, insensible aux accents, tolérante aux fautes).
 - 💻 **Interface web** : Interface web moderne et responsive (Dark Mode, animations fluides).
-- 🔗 **Affichage des liens** : Copier-coller le lien final s'affiche en un clic. 
+- ☑️ **Sélection multiple** : Une page de sélection dédiée permet de cocher plusieurs fichiers (épisodes, qualités) et de tous les récupérer en un appel via `/get-links` (jusqu'à 50 liens).
+- 🔗 **Affichage des liens** : Copier-coller le lien final s'affiche en un clic. Si JDownloader n'est pas configuré, le lien direct est affiché à la place.
 - ⚡ **Intégration JDownloader** : Envoi automatique des liens vers votre instance JDownloader (si activé dans les paramètres).
 
 ## 🔑 Ce qui nécessite (ou pas) un token
@@ -59,7 +60,7 @@
 
 ### 🐳 Via Docker (Recommandé)
 
-C'est la méthode la plus simple pour garder un environnement propre. Nous utilisons désormais une image pré-construite qui se met à jour automatiquement.
+C'est la méthode la plus simple pour garder un environnement propre. L'image est désormais **construite localement** à partir du `Dockerfile` du dépôt (build multi-stage, runtime non-root, FS en lecture seule, port lié à `127.0.0.1` uniquement).
 
 ```bash
 # 1. Cloner le projet (si ce n'est pas déjà fait)
@@ -68,13 +69,13 @@ git clone https://github.com/NoNoBzH22/Hydr-Hacked
 # 2. Préparer la configuration
 cp .env.example .env
 
-# 3. Lancer l'application
-docker compose up -d
+# 3. Construire et lancer l'application
+docker compose up -d --build
 ```
 📍 Accès : `http://localhost:3067`
 
 > [!TIP]
-> L'application utilise l'image `ghcr.io/nonobzh22/hydrhacked:latest`. Elle est reconstruite automatiquement à chaque mise à jour, vous n'avez plus besoin de compiler localement.
+> Après une `git pull`, relancez `docker compose up -d --build` pour reconstruire l'image avec les dernières modifications.
 
 ---
 
