@@ -1,4 +1,7 @@
-export type MediaType = 'movie' | 'series' | 'anime' | 'book' | 'game' | 'software' | 'music' | 'other';
+// `movie_series` is a search-filter sentinel only — it never appears
+// as a SearchResult.type, only as a `mediaType` argument to source.search()
+// asking the plugin to return movies + series + anime together.
+export type MediaType = 'movie' | 'series' | 'anime' | 'book' | 'game' | 'software' | 'music' | 'other' | 'movie_series';
 
 export interface SearchResult {
     title: string;

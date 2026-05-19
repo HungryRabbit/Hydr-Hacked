@@ -354,7 +354,9 @@ export class LocalDatabaseAPI implements ISource {
             ? results.filter(r => r.type === 'movie' || r.type === 'anime')
             : (mediaType === 'series')
                 ? results.filter(r => r.type === 'series' || r.type === 'anime')
-                : results.filter(r => r.type === mediaType);
+                : (mediaType === 'movie_series')
+                    ? results.filter(r => r.type === 'movie' || r.type === 'series' || r.type === 'anime')
+                    : results.filter(r => r.type === mediaType);
 
         console.log(`[LocalDB] search "${query}" → ${candidates.size} candidats, ${filtered.length} résultats en ${Date.now() - t0}ms`);
         return filtered;

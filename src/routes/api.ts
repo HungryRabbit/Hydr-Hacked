@@ -67,7 +67,11 @@ router.post('/search', async (req, res) => {
                          (reqMergeResults !== 'false' && reqMergeResult !== 'false');
 
     const rawType = rawTypeInput || typeInput || 'film';
-    const mediaType = rawType === 'film' ? 'movie' : (rawType === 'serie' ? 'series' : rawType);
+    const mediaType =
+        rawType === 'film' ? 'movie' :
+        rawType === 'serie' ? 'series' :
+        rawType === 'films_series' ? 'movie_series' :
+        rawType;
 
     if (!title) return res.status(400).json({ error: "Titre manquant." });
 

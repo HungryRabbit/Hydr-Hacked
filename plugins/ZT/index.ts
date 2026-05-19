@@ -64,6 +64,8 @@ export class ZoneTelechargementAPI implements ISource {
 
         if (mediaType === 'movie') {
             results = results.filter(r => r.type === 'movie' || r.type === 'anime');
+        } else if (mediaType === 'movie_series') {
+            results = results.filter(r => r.type === 'movie' || r.type === 'series' || r.type === 'anime');
         } else {
             results = results.filter(r => r.type === 'series' || r.type === 'anime');
         }
