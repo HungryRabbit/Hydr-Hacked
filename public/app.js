@@ -936,9 +936,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!isActuallySeries) return q.sizeVal <= MAX_FILM_SIZE_MB;
             return true;
         }).sort((a, b) => {
+            // Saison complète packs first, then for series we want strict
+            // episode-number order (E01, E02, …) — that's what the user
+            // expects when scanning the table. Quality rank and size are
+            // tertiary tiebreakers within the same episode.
             if (a.isFullSeason !== b.isFullSeason) return b.isFullSeason - a.isFullSeason;
+            if (isActuallySeries) {
+                const aEp = a.episodeNumber || 0;
+                const bEp = b.episodeNumber || 0;
+                if (aEp !== bEp) return aEp - bEp;
+            }
             if (a.rank !== b.rank) return a.rank - b.rank;
-            return a.sizeVal - b.sizeVal;
+            return (b.sizeBytes || 0) - (a.sizeBytes || 0);
         });
 
         if (enriched.length === 0) {
@@ -1129,6 +1138,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 host: q.host || '',
                                 quality: q.quality || '',
                                 episode: q.episode || '',
+                                episodeNumber: q.episodeNumber || 0,
                                 isFullSeason: !!q.isFullSeason
                             });
                         } else {
@@ -1506,6 +1516,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     host: q.host || '',
                                     quality: q.quality || '',
                                     episode: q.episode || '',
+                                    episodeNumber: q.episodeNumber || 0,
                                     isFullSeason: !!q.isFullSeason
                                 });
                             } else {
@@ -1641,11 +1652,24 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    // Sort bulk-resolution results into episode-number order so the listing
+    // matches what the user just saw in the selection table (E01, E02, …).
+    // Falls back to "Saison complète" packs first.
+    const sortResultsByEpisode = (results) => {
+        return results.slice().sort((a, b) => {
+            const ma = selectionState.items.get(a.chosenId) || {};
+            const mb = selectionState.items.get(b.chosenId) || {};
+            if (!!ma.isFullSeason !== !!mb.isFullSeason) return mb.isFullSeason ? 1 : -1;
+            return (ma.episodeNumber || 0) - (mb.episodeNumber || 0);
+        });
+    };
+
     const renderBulkResults = (results) => {
         const panel = dom('selection-results');
         panel.replaceChildren();
         panel.classList.remove('hidden');
 
+        results = sortResultsByEpisode(results);
         const successful = results.filter(r => !r.error);
         const allLinks = successful.map(r => r.link).join('\n');
 
@@ -1753,27 +1777,69 @@ document.addEventListener('DOMContentLoaded', () => {
         panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
+    // Validate + resolve a bulk selection. Returns { results } or null if
+    // the precondition (size limit / empty selection) failed.
+    const resolveSelectionLinks = async (useJD) => {
+        const ids = Array.from(selectionState.items.keys()).filter(Boolean);
+        if (ids.length === 0) {
+            showToast('Aucun élément sélectionné.');
+            return null;
+        }
+        if (ids.length > BULK_LINKS_MAX) {
+            showToast(`Limite: ${BULK_LINKS_MAX} liens par requête. Désélectionnez-en ${ids.length - BULK_LINKS_MAX}.`);
+            return null;
+        }
+        toggleBlockingLoader(true, `Récupération de ${ids.length} lien${ids.length > 1 ? 's' : ''}...`);
+        try {
+            const res = await apiCall('/get-links', 'POST', { chosenIds: ids, useJD });
+            toggleBlockingLoader(false);
+            return res || { results: [] };
+        } catch (e) {
+            toggleBlockingLoader(false);
+            showToast('Erreur: ' + e.message);
+            return null;
+        }
+    };
+
     const getAllBtn = dom('btn-selection-get-all');
     if (getAllBtn) {
         getAllBtn.onclick = async () => {
-            const ids = Array.from(selectionState.items.keys()).filter(Boolean);
-            if (ids.length === 0) {
-                showToast('Aucun élément sélectionné.');
-                return;
-            }
-            if (ids.length > BULK_LINKS_MAX) {
-                showToast(`Limite: ${BULK_LINKS_MAX} liens par requête. Désélectionnez-en ${ids.length - BULK_LINKS_MAX}.`);
-                return;
-            }
             const useJD = document.getElementById('toggle-jd') ? document.getElementById('toggle-jd').checked : false;
-            toggleBlockingLoader(true, `Récupération de ${ids.length} lien${ids.length > 1 ? 's' : ''}...`);
+            const res = await resolveSelectionLinks(useJD);
+            if (res) renderBulkResults(res.results || []);
+        };
+    }
+
+    // One-click bulk-copy: resolve every selected episode's link and drop
+    // them into the clipboard in episode order, joined by newlines. JD is
+    // intentionally skipped here — the user just wants the URLs.
+    const copyAllBtn = dom('btn-selection-copy-all');
+    if (copyAllBtn) {
+        copyAllBtn.onclick = async () => {
+            const res = await resolveSelectionLinks(false);
+            if (!res) return;
+            const results = sortResultsByEpisode(res.results || []);
+            const successful = results.filter(r => !r.error && r.link);
+            const text = successful.map(r => r.link).join('\n');
+            const errs = results.length - successful.length;
+            if (!successful.length) {
+                showToast('Aucun lien résolu.');
+                renderBulkResults(results);
+                return;
+            }
             try {
-                const res = await apiCall('/get-links', 'POST', { chosenIds: ids, useJD });
-                toggleBlockingLoader(false);
-                renderBulkResults(res.results || []);
-            } catch (e) {
-                toggleBlockingLoader(false);
-                showToast('Erreur: ' + e.message);
+                await navigator.clipboard.writeText(text);
+                showToast(errs > 0
+                    ? `${successful.length} lien${successful.length > 1 ? 's' : ''} copié${successful.length > 1 ? 's' : ''} — ${errs} échec${errs > 1 ? 's' : ''}.`
+                    : `${successful.length} lien${successful.length > 1 ? 's' : ''} copié${successful.length > 1 ? 's' : ''} !`);
+                // Still surface the table so the user can verify what was copied
+                // and grab any individual link if needed.
+                renderBulkResults(results);
+            } catch {
+                // Clipboard API blocked (insecure context, permission denied).
+                // Fall back to the table view where each row has a Copier button.
+                renderBulkResults(results);
+                showToast('Clipboard indisponible — copiez depuis le tableau.');
             }
         };
     }
